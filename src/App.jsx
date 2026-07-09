@@ -168,7 +168,7 @@ export default function App() {
           try { await rpc("accept_invite", { p_token: inviteToken }); } catch (e) { /* already used by me is fine if profile exists */ }
           window.history.replaceState({}, "", "/");
         }
-        const { data: prof } = await supabase.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+        const { data: prof } = await supabase.from("profiles").select("*").eq("auth_id", session.user.id).maybeSingle();
         if (!prof) { setPhase("invite"); return; }
         if (prof.revoked) { setPhase("denied"); return; }
         setMe(prof);
