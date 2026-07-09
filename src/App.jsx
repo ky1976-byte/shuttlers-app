@@ -363,6 +363,11 @@ export default function App() {
             }}
             onRevoke={(id, revoked) => run(() => supabase.from("profiles").update({ revoked }).eq("id", id).then(({ error }) => { if (error) throw error; }), revoked ? "Member revoked — access ends instantly." : "Member re-approved.")}
             onStatus={(id, status) => run(() => supabase.from("profiles").update({ status }).eq("id", id).then(({ error }) => { if (error) throw error; }))}
+            onRegenerate={(id, name) => run(async () => {
+              const token = await rpc("regenerate_invite", { p_profile_id: id });
+              const link = `${window.location.origin}/?invite=${token}`;
+              await navigator.clipboard.writeText(link).catch(() => {});
+            }, `New link for ${name} copied — the old link no longer works.`)}
             onPreset={(key, member_ids) => run(() => supabase.from("presets").update({ member_ids }).eq("key", key).then(({ error }) => { if (error) throw error; }), "List updated.")}
             onMonthCheck={() => run(() => rpc("month_start_prepay_check"), "Month-start pre-pay check completed.")} />
         )}
@@ -901,7 +906,7 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
 
 /* ---------------- admin ---------------- */
 
-function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate, onInvite, onRevoke, onStatus, onPreset, onMonthCheck, notify }) {
+function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate, onInvite, onRevoke, onStatus, onRegenerate, onPreset, onMonthCheck, notify }) {
   const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", ends: "", courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
   const [inv, setInv] = useState({ name: "", phone: "", admin: false, link: "" });
   const lbl = { fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 4, marginTop: 10 };
@@ -1009,6 +1014,7 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
               <select value={u.status} onChange={(e) => onStatus(u.id, e.target.value)} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12 }}>
                 <option value="member">Member</option><option value="prepay">Pre-pay</option><option value="explayer">Ex-player</option>
               </select>
+              <Btn small tone="ghost" onClick={() => onRegenerate(u.id, u.name)}>🔄 Regenerate link</Btn>
               {u.id !== me.id && (
                 <Btn small tone={u.revoked ? "ghost" : "red"} onClick={() => onRevoke(u.id, !u.revoked)}>{u.revoked ? "Re-approve" : "Revoke"}</Btn>
               )}
