@@ -74,6 +74,7 @@ const Screen = ({ children }) => (
 
 const capacityOf = (g) => g.capacity_override ?? g.courts * g.per_court;
 const isPastCutoff = (g) => Date.now() > new Date(g.starts_at).getTime() - g.cutoff_hours * 3600 * 1000;
+const isPastStart = (g) => Date.now() > new Date(g.starts_at).getTime();
 const fmtDT = (g) => {
   const s = new Date(g.starts_at), e = new Date(g.ends_at);
   const day = s.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
@@ -152,6 +153,43 @@ export default function App() {
   const isAdmin = !!me?.is_admin;
 
   /* ---- auth bootstrap ---- */
+  const [inviteInput, setInviteInput] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
+
+  /* Redeem an invite from a pasted link or raw token. Used both for the
+     normal ?invite= URL flow AND the manual "paste your link" fallback —
+     iOS home-screen icons get their own isolated storage separate from
+     Safari, so a link opened in Safari can't hand off a session to the
+     icon. Pasting the link straight into the icon's own "Members only"
+     screen lets it sign in for real inside that isolated storage. */
+  const redeemInvite = async (raw) => {
+    setInviteError(""); setInviteBusy(true);
+    try {
+      let token = (raw || "").trim();
+      const m = token.match(/invite=([a-zA-Z0-9-]+)/);
+      if (m) token = m[1];
+      if (!token) throw new Error("Paste your invite link or code first.");
+      let { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        const { error } = await supabase.auth.signInAnonymously();
+        if (error) throw error;
+        session = (await supabase.auth.getSession()).data.session;
+      }
+      await rpc("accept_invite", { p_token: token });
+      const { data: prof } = await supabase.from("profiles").select("*").eq("auth_id", session.user.id).maybeSingle();
+      if (!prof) throw new Error("Signed in, but no profile found — contact an admin.");
+      if (prof.revoked) { setPhase("denied"); return; }
+      window.history.replaceState({}, "", "/");
+      setMe(prof);
+      setPhase("ready");
+    } catch (e) {
+      setInviteError(e.message || "Could not redeem that invite.");
+    } finally {
+      setInviteBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (!configured) { setPhase("error"); setErrMsg("App not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."); return; }
     (async () => {
@@ -180,6 +218,7 @@ export default function App() {
   /* ---- data loading ---- */
   const loadAll = async () => {
     if (!supabase) return;
+    try { await rpc("check_promotions"); } catch (e) { /* non-critical — next load will retry */ }
     const [pr, gm, bl, tx, pe, ma, ex, ps, cb, rc] = await Promise.all([
       supabase.from("profiles").select("*").order("name"),
       supabase.from("games").select("*, roster(*)").order("starts_at", { ascending: true }),
@@ -207,6 +246,8 @@ export default function App() {
       const { data: fresh } = await supabase.from("profiles").select("*").eq("id", me.id).maybeSingle();
       if (fresh) { if (fresh.revoked) setPhase("denied"); setMe(fresh); }
     }
+    /* note: this lookup is correctly by id (not auth_id) — me.id is the
+       stable profile id we already resolved at sign-in, not an auth id. */
   };
 
   useEffect(() => { if (phase === "ready") loadAll(); /* eslint-disable-next-line */ }, [phase]);
@@ -251,6 +292,24 @@ export default function App() {
       <div style={{ fontSize: 15, fontWeight: 600 }}>Members only</div>
       <div style={{ fontSize: 13, opacity: 0.8, marginTop: 8 }}>
         This app is invite-only. Ask a club admin (Assad, Mustafa or Anil) to send you a one-time invite link on WhatsApp, then open it on this device — you'll stay signed in.
+      </div>
+      <div style={{ marginTop: 20, textAlign: "left" }}>
+        <div style={{ fontSize: 11.5, opacity: 0.75, marginBottom: 6 }}>
+          Already have a link? Paste it below — useful if this is a home screen icon that isn't picking up the link automatically.
+        </div>
+        <input
+          value={inviteInput}
+          onChange={(e) => setInviteInput(e.target.value)}
+          placeholder="Paste invite link or code"
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #2A4E8F", background: "#0A2450", color: "#fff", fontSize: 13 }}
+        />
+        {inviteError && <div style={{ color: "#FFB4A0", fontSize: 12, marginTop: 6 }}>{inviteError}</div>}
+        <button
+          disabled={inviteBusy}
+          onClick={() => redeemInvite(inviteInput)}
+          style={{ marginTop: 10, width: "100%", background: T.shuttle, color: T.ink, border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, fontSize: 13, cursor: inviteBusy ? "default" : "pointer", opacity: inviteBusy ? 0.6 : 1 }}>
+          {inviteBusy ? "Signing in…" : "Sign in with this link"}
+        </button>
       </div>
     </Screen>
   );
@@ -310,8 +369,13 @@ export default function App() {
             onConfirm={(r) => run(() => rpc("confirm_spot", { p_roster: r.id }), "Spot confirmed. See you on court!")}
             onDecline={(r) => run(() => rpc("drop_out", { p_roster: r.id }))}
             onClose={() => run(() => rpc("close_game", { p_game: game.id }), "Game closed & players billed.")}
+            onCancel={() => {
+              if (!window.confirm(`Cancel "${game.title}"? This permanently deletes the game, its roster, and any match results. This cannot be undone.`)) return;
+              run(() => rpc("cancel_game", { p_game: game.id }), "Game cancelled and removed.").then(() => setOpenGame(null));
+            }}
             onCost={(v) => run(() => supabase.from("games").update({ cost_per_player: v }).eq("id", game.id).then(({ error }) => { if (error) throw error; }))}
             onPenaltyAmt={(v) => run(() => supabase.from("games").update({ penalty: v }).eq("id", game.id).then(({ error }) => { if (error) throw error; }))}
+            onResize={(courts, perCourt, cap) => run(() => rpc("update_game_config", { p_game: game.id, p_courts: courts, p_per_court: perCourt, p_cap: cap }), "Game size updated — overflow moved to waitlist / new spots offered from waitlist.")}
             onResolvePenalty={(pid, a) => run(() => rpc("resolve_penalty", { p_penalty: pid, p_action: a }), a === "applied" ? "Penalty charged." : "Penalty waived.")}
             onTournament={() => run(async () => {
               const names = game.roster.filter((r) => r.status === "in")
@@ -435,8 +499,9 @@ function GamesList({ games, me, isAdmin, onOpen, onCreate }) {
 
 /* ---------------- game detail ---------------- */
 
-function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, onBack, onJoin, onGuest, onDrop, onConfirm, onDecline, onClose, onCost, onPenaltyAmt, onResolvePenalty, onTournament, onWinner }) {
+function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, onBack, onJoin, onGuest, onDrop, onConfirm, onDecline, onClose, onCancel, onCost, onPenaltyAmt, onResize, onResolvePenalty, onTournament, onWinner }) {
   const [guestName, setGuestName] = useState("");
+  const [resize, setResize] = useState({ courts: game.courts, perCourt: game.per_court, cap: game.capacity_override ?? "" });
   const cap = capacityOf(game);
   const byTime = (a, b) => new Date(a.joined_at) - new Date(b.joined_at);
   const playing = game.roster.filter((r) => r.status === "in").sort(byTime);
@@ -446,6 +511,7 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
   const label = (r) => (r.kind === "guest" ? `${r.guest_name} (${nameOf(r.user_id)})` : nameOf(r.user_id));
   const isMine = (r) => r.user_id === me.id;
   const pastCutoff = isPastCutoff(game);
+  const pastStart = isPastStart(game);
   const rounds = useMemo(() => {
     const map = new Map();
     matches.forEach((m) => { if (!map.has(m.round)) map.set(m.round, []); map.get(m.round).push(m); });
@@ -463,8 +529,9 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
         {r.status === "pending" && <Pill tone="gold">Confirm by {new Date(r.pending_until).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</Pill>}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
-        {r.status === "pending" && (isMine(r) || isAdmin) && (<><Btn small onClick={() => onConfirm(r)}>Confirm</Btn><Btn small tone="red" onClick={() => onDecline(r)}>Decline</Btn></>)}
-        {(isMine(r) || isAdmin) && r.status !== "pending" && !game.closed && (
+        {r.status === "pending" && (isMine(r) || isAdmin) && (<Btn small onClick={() => onConfirm(r)}>Confirm</Btn>)}
+        {r.status === "pending" && (isMine(r) || isAdmin) && !pastStart && (<Btn small tone="red" onClick={() => onDecline(r)}>Decline</Btn>)}
+        {(isMine(r) || isAdmin) && r.status !== "pending" && !game.closed && !pastStart && (
           <Btn small tone="red" onClick={() => onDrop(r)}>{r.status === "in" ? "Drop out" : "Remove"}</Btn>
         )}
       </div>
@@ -484,10 +551,21 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
           {game.map_link && <> · <a href={game.map_link} target="_blank" rel="noreferrer" style={{ color: T.court, fontWeight: 600 }}>📍 Map</a></>}
         </div>
         <div style={{ fontSize: 12.5, color: T.sub, marginTop: 2 }}>
-          {game.courts} court{game.courts > 1 ? "s" : ""} · capacity {cap} · cutoff {game.cutoff_hours}h before start
+          {isAdmin && !game.closed ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <input type="number" min={1} value={resize.courts} onChange={(e) => setResize({ ...resize, courts: +e.target.value })} style={{ ...inputStyle, width: 44, padding: "3px 6px" }} /> court(s) ×
+              <input type="number" min={1} value={resize.perCourt} onChange={(e) => setResize({ ...resize, perCourt: +e.target.value })} style={{ ...inputStyle, width: 44, padding: "3px 6px" }} /> per court · override cap
+              <input type="number" min={1} placeholder={String(resize.courts * resize.perCourt)} value={resize.cap} onChange={(e) => setResize({ ...resize, cap: e.target.value })} style={{ ...inputStyle, width: 54, padding: "3px 6px" }} />
+              <Btn small tone="ghost" onClick={() => onResize(resize.courts, resize.perCourt, resize.cap === "" ? null : +resize.cap)}>Save size</Btn>
+            </span>
+          ) : (
+            <>{game.courts} court{game.courts > 1 ? "s" : ""} · capacity {cap}</>
+          )}
+          {" "}· cutoff {game.cutoff_hours}h before start
           {pastCutoff && !game.closed && <> · <b style={{ color: T.red }}>past cutoff — penalties apply</b></>}
           {" "}· round robin: {game.rr_mode === "auto" ? "auto" : "manual"}
         </div>
+        {isAdmin && !game.closed && <div style={{ fontSize: 11.5, color: T.sub, marginTop: 2 }}>Shrinking waitlists the most recent joiners; growing auto-offers spots from the waitlist.</div>}
 
         <div style={{ fontSize: 12.5, color: T.sub, marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           Cost/player: AED{" "}
@@ -516,7 +594,7 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
         {!game.closed && (
           <>
             <SectionHead color={T.amber}>WAITLIST ({waits.length})</SectionHead>
-            <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 4 }}>Members first, guests below — promoted in join order with a 12h confirmation window.</div>
+            <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 4 }}>Members promoted immediately as spots open (12h confirmation window). Guests are only promoted after the cutoff passes.</div>
             {waits.map((r, i) => <Row key={r.id} r={r} i={i} />)}
             {!waits.length && <div style={{ fontSize: 13, color: T.sub, padding: "8px 0" }}>Waitlist is empty.</div>}
 
@@ -598,9 +676,11 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {!rounds.length && <Btn small tone="ghost" onClick={onTournament}>🏆 Create round robin</Btn>}
               <Btn small tone="gold" onClick={onClose}>Close game & bill players</Btn>
+              <Btn small tone="red" onClick={onCancel}>Cancel game</Btn>
             </div>
             <div style={{ fontSize: 11.5, color: T.sub, marginTop: 6 }}>
               Closing bills AED {game.cost_per_player} per confirmed player (guests to their sponsor), updates appearances, and adds this game to the monthly consolidation. The cutoff flips automatically from the game time.
+              {" "}<b>Cancel</b> permanently deletes an unbilled game (e.g. rained out) — no charges, no record kept.
             </div>
           </div>
         )}
