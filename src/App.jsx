@@ -896,11 +896,54 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
   const cell = { padding: "7px 4px", fontSize: 12, borderBottom: `1px solid ${T.line}` };
   const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 
+  const exportExcel = async () => {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.utils.book_new();
+
+    const summaryRows = closed.map((g) => {
+      const d = new Date(g.starts_at);
+      return {
+        Date: d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
+        Day: d.toLocaleDateString("en-GB", { weekday: "long" }),
+        Courts: g.courts,
+        Planned: capacityOf(g),
+        Actual: g.actual_players,
+        "Per player (AED)": g.cost_per_player,
+        "Collected from game (AED)": g.collected,
+        "Collected from penalty (AED)": +g.penalty_collected || 0,
+        "Total (AED)": (+g.collected || 0) + (+g.penalty_collected || 0),
+      };
+    });
+    summaryRows.push({});
+    summaryRows.push({ Date: "Opening balance", "Total (AED)": +recon.opening });
+    summaryRows.push({ Date: "Game collections", "Total (AED)": collections });
+    summaryRows.push({ Date: "Penalties collected", "Total (AED)": pens });
+    summaryRows.push({ Date: "Expenses", "Total (AED)": -spent });
+    summaryRows.push({ Date: "Calculated closing balance", "Total (AED)": calcClose });
+    if (recon.actual_closing != null) {
+      summaryRows.push({ Date: "Actual closing (manual)", "Total (AED)": +recon.actual_closing });
+      summaryRows.push({ Date: "Variance", "Total (AED)": variance });
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "Summary");
+
+    const expenseRows = monthExpenses.map((e) => ({
+      Date: fmtDate(e.spent_on), Category: e.category, Description: e.description, "Amount (AED)": -e.amount,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expenseRows), "Expenses");
+
+    XLSX.writeFile(wb, `Shuttlers-consolidation-${recon.month.slice(0, 7)}.xlsx`);
+  };
+
   return (
     <>
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>Monthly consolidation — {monthLabel}</div>
-        <div style={{ fontSize: 12, color: T.sub, marginBottom: 10 }}>All figures from the app; only opening and actual closing are manual reconciliation.</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+          <div>
+            <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>Monthly consolidation — {monthLabel}</div>
+            <div style={{ fontSize: 12, color: T.sub, marginBottom: 10 }}>All figures from the app; only opening and actual closing are manual reconciliation.</div>
+          </div>
+          <Btn small tone="ghost" onClick={exportExcel}>⬇ Export to Excel</Btn>
+        </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 12.5, fontWeight: 600 }}>Opening balance (manual):</span>
@@ -989,12 +1032,23 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
 function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate, onInvite, onRevoke, onStatus, onRegenerate, onPreset, onMonthCheck, notify }) {
   const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", ends: "", courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
   const [inv, setInv] = useState({ name: "", phone: "", admin: false, link: "" });
+  const [sub, setSub] = useState("games");
   const lbl = { fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 4, marginTop: 10 };
   const input = { ...inputStyle, width: "100%" };
-  const active = profiles.filter((u) => !u.revoked && u.status !== "explayer");
+  const subTabs = [["games", "Games"], ["members", "Members"], ["lists", "Lists"]];
 
   return (
     <>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {subTabs.map(([k, label]) => (
+          <button key={k} onClick={() => setSub(k)}
+            style={{ background: sub === k ? T.court : "transparent", color: sub === k ? "#fff" : T.court, border: `1.5px solid ${T.court}`, fontWeight: 600, fontSize: 12.5, padding: "6px 14px", borderRadius: 999, cursor: "pointer" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {sub === "games" && (
       <Card style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>Games</div>
@@ -1055,7 +1109,9 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
           </div>
         )}
       </Card>
+      )}
 
+      {sub === "members" && (<>
       <Card style={{ marginBottom: 14 }}>
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Invite a member</div>
         <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Generates a one-time link — share it on WhatsApp. They open it once and stay signed in until revoked.</div>
@@ -1102,28 +1158,94 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
           </div>
         ))}
       </Card>
+      </>)}
 
+      {sub === "lists" && (
       <Card>
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Predefined player lists</div>
-        <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Selecting a list when creating a game auto-confirms these players onto the roster.</div>
+        <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Selecting a list when creating a game auto-confirms these players onto the roster. Ranked: pre-pay members first, then by 50% total games + 50% last-20 same-day appearances.</div>
         {presets.map((p) => (
-          <div key={p.key} style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{p.label}</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {active.map((u) => {
-                const on = p.member_ids.includes(u.id);
-                return (
-                  <button key={u.id}
-                    onClick={() => onPreset(p.key, on ? p.member_ids.filter((x) => x !== u.id) : [...p.member_ids, u.id])}
-                    style={{ background: on ? T.court : "transparent", color: on ? "#fff" : T.court, border: `1.5px solid ${T.court}`, borderRadius: 999, padding: "5px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
-                    {u.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <PresetRankedList key={p.key} preset={p} onToggle={onPreset} notify={notify} />
         ))}
       </Card>
+      )}
     </>
+  );
+}
+
+/* Ranked list-builder for one predefined list (e.g. Saturday). Pulls the
+   weighted ranking from the list_ranking(p_dow) Postgres function — pre-pay
+   members as a block above members, each sorted by 50% total games + 50%
+   last-20 appearances on this list's specific day of week. */
+const DOW_MAP = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+
+function PresetRankedList({ preset, onToggle, notify }) {
+  const [rows, setRows] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const dow = DOW_MAP[preset.key.toLowerCase()];
+
+  useEffect(() => {
+    let cancelled = false;
+    if (dow === undefined) { setRows(null); setLoading(false); return; }
+    setLoading(true);
+    rpc("list_ranking", { p_dow: dow })
+      .then((data) => { if (!cancelled) setRows(data || []); })
+      .catch((e) => { if (!cancelled) { notify(e.message); setRows([]); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [preset.key]);
+
+  const dayLabel = dow !== undefined ? Object.keys(DOW_MAP).find((k) => DOW_MAP[k] === dow) : null;
+  const cell = { padding: "8px 4px", fontSize: 13, borderBottom: `1px solid ${T.line}` };
+  const head = { padding: "6px 4px", fontSize: 11, color: T.sub, textTransform: "uppercase", letterSpacing: 0.3 };
+  const cols = "24px minmax(0,1.4fr) 80px 90px 60px 84px";
+
+  const group = (status, label) => {
+    const list = (rows || []).filter((r) => r.status === status);
+    if (!list.length) return null;
+    return (
+      <div key={status} style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, background: "#EEF3FA", padding: "5px 8px", borderRadius: 6 }}>{label}</div>
+        <div style={{ display: "grid", gridTemplateColumns: cols, gap: 6 }}>
+          <span style={head}></span><span style={head}>Player</span><span style={head}>Total games</span>
+          <span style={head}>Last 20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={head}>Score</span><span style={head}></span>
+          {list.map((r, i) => {
+            const on = preset.member_ids.includes(r.profile_id);
+            return (
+              <React.Fragment key={r.profile_id}>
+                <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
+                <span style={{ ...cell, fontWeight: 500 }}>{r.name}</span>
+                <span style={cell}>{r.total_games}</span>
+                <span style={cell}>{r.last20_pct}%</span>
+                <span style={{ ...cell, fontWeight: 700 }}>{r.score}</span>
+                <span style={{ ...cell, textAlign: "right" }}>
+                  <Btn small tone={on ? "ghost" : "court"}
+                    onClick={() => onToggle(preset.key, on ? preset.member_ids.filter((x) => x !== r.profile_id) : [...preset.member_ids, r.profile_id])}>
+                    {on ? "✓ Added" : "Add"}
+                  </Btn>
+                </span>
+              </React.Fragment>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{preset.label}</div>
+      {dow === undefined && (
+        <div style={{ fontSize: 12, color: T.sub }}>This list's key ("{preset.key}") isn't a recognized weekday, so it can't be ranked — showing no ranking. Rename the preset key to a day name (e.g. "saturday") to enable ranking.</div>
+      )}
+      {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading ranking…</div>}
+      {dow !== undefined && !loading && rows && (
+        <>
+          {group("prepay", "Pre-pay")}
+          {group("member", "Member")}
+          {!rows.length && <div style={{ fontSize: 12, color: T.sub }}>No active players found.</div>}
+        </>
+      )}
+    </div>
   );
 }
