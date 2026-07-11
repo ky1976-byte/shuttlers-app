@@ -12,6 +12,8 @@ const T = {
 };
 const font = { display: "'Archivo', system-ui, sans-serif", body: "'Inter', system-ui, sans-serif" };
 const inputStyle = { border: `1px solid ${T.line}`, borderRadius: 8, padding: "9px 12px", fontSize: 13, fontFamily: font.body };
+const APP_VERSION = "1.1.0";
+const APP_UPDATED = "11 July 2026";
 
 /* ---------------- ui atoms ---------------- */
 
@@ -63,7 +65,7 @@ const StatusPill = ({ status }) =>
 const Screen = ({ children }) => (
   <div style={{ fontFamily: font.body, background: T.courtDark, minHeight: "100vh", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
     <div style={{ maxWidth: 420, textAlign: "center" }}>
-      <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 26 }}>SHUTTLERS<span style={{ color: T.shuttle }}> BC</span></div>
+      <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 26 }}>Shuttlers<span style={{ color: T.shuttle }}> Club</span></div>
       <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 20 }}>Shuttlers Badminton Club UAE</div>
       {children}
     </div>
@@ -139,6 +141,7 @@ export default function App() {
   const [openGame, setOpenGame] = useState(null);
   const [openPlayer, setOpenPlayer] = useState(null);
   const [toast, setToast] = useState(null);
+  const [showAbout, setShowAbout] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const reloadTimer = useRef(null);
 
@@ -328,15 +331,20 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 22, letterSpacing: -0.4 }}>
-                SHUTTLERS<span style={{ color: T.shuttle }}> BC</span>
+                Shuttlers<span style={{ color: T.shuttle }}> Club</span>
               </div>
               <div style={{ fontSize: 11.5, opacity: 0.75 }}>Hi {me.name}{isAdmin ? " · admin" : ""}</div>
             </div>
-            {vapid && "Notification" in window && Notification.permission === "default" && (
-              <button onClick={enablePush} style={{ background: "#0A2450", color: "#fff", border: "1px solid #2A4E8F", borderRadius: 8, padding: "6px 10px", fontSize: 12, cursor: "pointer" }}>
-                🔔 Enable alerts
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {vapid && "Notification" in window && Notification.permission === "default" && (
+                <button onClick={enablePush} style={{ background: "#0A2450", color: "#fff", border: "1px solid #2A4E8F", borderRadius: 8, padding: "6px 10px", fontSize: 12, cursor: "pointer" }}>
+                  🔔 Enable alerts
+                </button>
+              )}
+              <button onClick={() => setShowAbout(true)} aria-label="About Shuttlers Club" style={{ background: "#0A2450", color: "#fff", border: "1px solid #2A4E8F", borderRadius: 8, width: 30, height: 30, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                ⓘ
               </button>
-            )}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
             {tabs.map(([k, label]) => (
@@ -442,6 +450,29 @@ export default function App() {
           🔔 {toast}
         </div>
       )}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+    </div>
+  );
+}
+
+/* ---------------- about ---------------- */
+
+function AboutModal({ onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(16,28,46,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 60 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: T.card, borderRadius: 16, padding: 22, maxWidth: 320, width: "100%", textAlign: "center" }}>
+        <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 20 }}>
+          Shuttlers<span style={{ color: T.amber }}> Club</span>
+        </div>
+        <div style={{ fontSize: 12.5, color: T.sub, marginTop: 4 }}>Shuttlers Badminton Club UAE</div>
+        <div style={{ height: 1, background: T.line, margin: "16px 0" }} />
+        <div style={{ fontSize: 13, color: T.sub }}>Version {APP_VERSION}</div>
+        <div style={{ fontSize: 13, color: T.sub, marginTop: 2 }}>Updated {APP_UPDATED}</div>
+        <div style={{ fontSize: 12, color: T.sub, marginTop: 16 }}>© {new Date().getFullYear()} Kamal. All rights reserved.</div>
+        <button onClick={onClose} style={{ marginTop: 18, background: T.court, color: "#fff", border: "none", borderRadius: 10, padding: "9px 22px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+          Close
+        </button>
+      </div>
     </div>
   );
 }
