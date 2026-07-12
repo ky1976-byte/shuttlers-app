@@ -743,19 +743,22 @@ function PlayersView({ profiles, balances, games, onOpen, isAdmin }) {
     <Card>
       <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Player appearances</div>
       <div style={{ fontSize: 12, color: T.sub, marginBottom: 10 }}>Visible to all members. Tap a player for history{isAdmin ? " and to edit initial data" : ""}.</div>
-      <div style={{ display: "grid", gridTemplateColumns: "24px 1fr 80px 60px 70px", gap: 6, fontSize: 11.5, fontWeight: 700, color: T.sub, padding: "6px 0", borderBottom: `2px solid ${T.line}` }}>
+      <div style={{ display: "grid", gridTemplateColumns: "24px 1fr 76px 56px 64px", gap: 6, fontSize: 11.5, fontWeight: 700, color: T.sub, padding: "6px 0", borderBottom: `2px solid ${T.line}` }}>
         <span>#</span><span>Player</span><span style={{ textAlign: "right" }}>Balance</span><span style={{ textAlign: "right" }}>Games</span><span style={{ textAlign: "right" }}>Last 20</span>
       </div>
       {rows.map((u, i) => (
         <div key={u.id} onClick={() => onOpen(u.id)}
-          style={{ display: "grid", gridTemplateColumns: "24px 1fr 80px 60px 70px", gap: 6, fontSize: 13.5, padding: "9px 0", borderBottom: `1px solid ${T.line}`, alignItems: "center", cursor: "pointer" }}>
-          <span style={{ color: T.sub, fontSize: 12 }}>{i + 1}</span>
-          <span style={{ fontWeight: 600 }}>{u.name} {u.status !== "member" && <StatusPill status={u.status} />}</span>
-          <span style={{ textAlign: "right", background: heat(u.bal), borderRadius: 6, padding: "2px 6px", fontWeight: 600, color: u.bal < 0 ? T.red : u.bal > 0 ? T.green : T.ink }}>
+          style={{ display: "grid", gridTemplateColumns: "24px 1fr 76px 56px 64px", gap: 6, fontSize: 13.5, padding: "9px 0", borderBottom: `1px solid ${T.line}`, alignItems: "start", cursor: "pointer" }}>
+          <span style={{ color: T.sub, fontSize: 12, paddingTop: 2 }}>{i + 1}</span>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, minWidth: 0 }}>
+            <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{u.name}</span>
+            {u.status !== "member" && <StatusPill status={u.status} />}
+          </div>
+          <span style={{ textAlign: "right", background: heat(u.bal), borderRadius: 6, padding: "2px 6px", fontWeight: 600, color: u.bal < 0 ? T.red : u.bal > 0 ? T.green : T.ink, whiteSpace: "nowrap" }}>
             {u.bal === 0 ? "—" : `AED ${u.bal}`}
           </span>
-          <span style={{ textAlign: "right" }}>{u.apps}</span>
-          <span style={{ textAlign: "right", color: T.sub }}>{u.l20 === null ? "—" : u.l20 + "%"}</span>
+          <span style={{ textAlign: "right", paddingTop: 2 }}>{u.apps}</span>
+          <span style={{ textAlign: "right", color: T.sub, paddingTop: 2 }}>{u.l20 === null ? "—" : u.l20 + "%"}</span>
         </div>
       ))}
       <div style={{ fontSize: 11, color: T.sub, marginTop: 8 }}>"Last 20" = share of the club's last 20 games the player attended.</div>
@@ -1194,7 +1197,7 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
       {sub === "lists" && (
       <Card>
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Predefined player lists</div>
-        <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Selecting a list when creating a game auto-confirms these players onto the roster. Ranked: pre-pay members first, then by 50% total games + 50% last-20 same-day appearances.</div>
+        <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Selecting a list when creating a game auto-confirms these players onto the roster. Tap a day to expand it — each shows only players with at least 1 appearance in that day's last 20 games, pre-pay members ranked first, then by 50% total games + 50% last-20 appearances.</div>
         {presets.map((p) => (
           <PresetRankedList key={p.key} preset={p} onToggle={onPreset} notify={notify} />
         ))}
@@ -1207,12 +1210,28 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
 /* Ranked list-builder for one predefined list (e.g. Saturday). Pulls the
    weighted ranking from the list_ranking(p_dow) Postgres function — pre-pay
    members as a block above members, each sorted by 50% total games + 50%
-   last-20 appearances on this list's specific day of week. */
-const DOW_MAP = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+   last-20 appearances on this list's specific day of week. Collapsed by
+   default (shows just the day name + how many players are currently
+   eligible); expands on tap to the full ranked table, which only ever
+   shows players who've attended at least one of the last 20 games on
+   that specific day — everyone else (however storied their all-time
+   record) drops out of the list until they play that day again.
+   Accepts common short keys ("sat", "tue", "thu"...) as well as full
+   day names, so a preset doesn't silently stop ranking over naming. */
+const DOW_MAP = {
+  sun: 0, sunday: 0,
+  mon: 1, monday: 1,
+  tue: 2, tues: 2, tuesday: 2,
+  wed: 3, weds: 3, wednesday: 3,
+  thu: 4, thur: 4, thurs: 4, thursday: 4,
+  fri: 5, friday: 5,
+  sat: 6, saturday: 6,
+};
 
 function PresetRankedList({ preset, onToggle, notify }) {
   const [rows, setRows] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const dow = DOW_MAP[preset.key.toLowerCase()];
 
   useEffect(() => {
@@ -1226,33 +1245,34 @@ function PresetRankedList({ preset, onToggle, notify }) {
     return () => { cancelled = true; };
   }, [preset.key]);
 
-  const dayLabel = dow !== undefined ? Object.keys(DOW_MAP).find((k) => DOW_MAP[k] === dow) : null;
-  const cell = { padding: "8px 4px", fontSize: 13, borderBottom: `1px solid ${T.line}` };
-  const head = { padding: "6px 4px", fontSize: 11, color: T.sub, textTransform: "uppercase", letterSpacing: 0.3 };
-  const cols = "24px minmax(0,1.4fr) 80px 90px 60px 84px";
+  const dayLabel = dow !== undefined ? Object.keys(DOW_MAP).find((k) => DOW_MAP[k] === dow && k.length > 3) : null;
+  const eligible = (rows || []).filter((r) => r.last20_pct > 0);
+  const cell = { padding: "8px 4px", fontSize: 13, borderBottom: `1px solid ${T.line}`, minWidth: 0, overflowWrap: "anywhere" };
+  const head = { padding: "6px 4px", fontSize: 10.5, color: T.sub, textTransform: "uppercase", letterSpacing: 0.2 };
+  const cols = "20px minmax(0,1fr) 46px 46px 40px 58px";
 
   const group = (status, label) => {
-    const list = (rows || []).filter((r) => r.status === status);
+    const list = eligible.filter((r) => r.status === status);
     if (!list.length) return null;
     return (
       <div key={status} style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, background: "#EEF3FA", padding: "5px 8px", borderRadius: 6 }}>{label}</div>
-        <div style={{ display: "grid", gridTemplateColumns: cols, gap: 6 }}>
-          <span style={head}></span><span style={head}>Player</span><span style={head}>Total games</span>
-          <span style={head}>Last 20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={head}>Score</span><span style={head}></span>
+        <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
+          <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Games</span>
+          <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={{ ...head, textAlign: "right" }}>Score</span><span style={head}></span>
           {list.map((r, i) => {
             const on = preset.member_ids.includes(r.profile_id);
             return (
               <React.Fragment key={r.profile_id}>
                 <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
                 <span style={{ ...cell, fontWeight: 500 }}>{r.name}</span>
-                <span style={cell}>{r.total_games}</span>
-                <span style={cell}>{r.last20_pct}%</span>
-                <span style={{ ...cell, fontWeight: 700 }}>{r.score}</span>
+                <span style={{ ...cell, textAlign: "right" }}>{r.total_games}</span>
+                <span style={{ ...cell, textAlign: "right" }}>{r.last20_pct}%</span>
+                <span style={{ ...cell, fontWeight: 700, textAlign: "right" }}>{r.score}</span>
                 <span style={{ ...cell, textAlign: "right" }}>
                   <Btn small tone={on ? "ghost" : "court"}
                     onClick={() => onToggle(preset.key, on ? preset.member_ids.filter((x) => x !== r.profile_id) : [...preset.member_ids, r.profile_id])}>
-                    {on ? "✓ Added" : "Add"}
+                    {on ? "✓" : "Add"}
                   </Btn>
                 </span>
               </React.Fragment>
@@ -1264,18 +1284,30 @@ function PresetRankedList({ preset, onToggle, notify }) {
   };
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{preset.label}</div>
-      {dow === undefined && (
-        <div style={{ fontSize: 12, color: T.sub }}>This list's key ("{preset.key}") isn't a recognized weekday, so it can't be ranked — showing no ranking. Rename the preset key to a day name (e.g. "saturday") to enable ranking.</div>
-      )}
-      {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading ranking…</div>}
-      {dow !== undefined && !loading && rows && (
-        <>
-          {group("prepay", "Pre-pay")}
-          {group("member", "Member")}
-          {!rows.length && <div style={{ fontSize: 12, color: T.sub }}>No active players found.</div>}
-        </>
+    <div style={{ marginBottom: 10, border: `1px solid ${T.line}`, borderRadius: 10, overflow: "hidden" }}>
+      <button onClick={() => setExpanded((x) => !x)}
+        style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F8FAFD", border: "none", padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700 }}>{preset.label}</span>
+        <span style={{ fontSize: 12, color: T.sub, display: "flex", alignItems: "center", gap: 6 }}>
+          {dow === undefined ? "not rankable" : loading ? "loading…" : `${eligible.length} eligible`}
+          <span style={{ fontSize: 10 }}>{expanded ? "▾" : "▸"}</span>
+        </span>
+      </button>
+      {expanded && (
+        <div style={{ padding: "10px 12px" }}>
+          {dow === undefined && (
+            <div style={{ fontSize: 12, color: T.sub }}>This list's key ("{preset.key}") isn't a recognized weekday, so it can't be ranked. Rename the preset key to a day name (e.g. "saturday") to enable ranking.</div>
+          )}
+          {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading ranking…</div>}
+          {dow !== undefined && !loading && rows && (
+            <>
+              <div style={{ fontSize: 11, color: T.sub, marginBottom: 8 }}>Showing only players with at least 1 appearance in the last 20 {dayLabel || preset.key} games. Pre-pay members ranked first.</div>
+              {group("prepay", "Pre-pay")}
+              {group("member", "Member")}
+              {!eligible.length && <div style={{ fontSize: 12, color: T.sub }}>No one has attended a {dayLabel || preset.key} game in the last 20 yet.</div>}
+            </>
+          )}
+        </div>
       )}
     </div>
   );
