@@ -1346,7 +1346,7 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
           {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading…</div>}
 
           <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 2 }}>On this list</div>
-          <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>Drag a slider to reorder. ✕ pauses someone without removing them — they stay right here, ready to re-add with ✓. When a game has fewer spots than active people here, the lowest-priority names waitlist automatically.</div>
+          <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>Pick a number to move someone to that position. ✕ pauses without removing them — they stay right here, ready to re-add with ✓. When a game has fewer spots than active people here, the lowest-priority names waitlist automatically.</div>
           {onListEntries.length ? (
             <div style={{ display: "grid", gridTemplateColumns: onListCols, gap: 4 }}>
               <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Order</span><span style={head}></span>
@@ -1355,11 +1355,12 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
                   <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
                   {nameCell(entry.row, !entry.active)}
                   <span style={{ ...cell, textAlign: "right" }}>
-                    <input type="range" min={1} max={onListEntries.length} defaultValue={i + 1}
-                      key={`${entry.id}-${entry.order}`}
-                      onMouseUp={(e) => reorder(+e.target.value - 1, entry.id)}
-                      onTouchEnd={(e) => reorder(+e.target.value - 1, entry.id)}
-                      style={{ width: 68 }} aria-label={`Reorder ${entry.row.name}`} />
+                    <select value={i + 1}
+                      onChange={(e) => reorder(+e.target.value - 1, entry.id)}
+                      style={{ ...inputStyle, padding: "4px 6px", fontSize: 12, width: 52 }}
+                      aria-label={`Reorder ${entry.row.name}`}>
+                      {onListEntries.map((_, n) => <option key={n + 1} value={n + 1}>{n + 1}</option>)}
+                    </select>
                   </span>
                   <span style={{ ...cell, textAlign: "right" }}>
                     <button onClick={() => toggleActive(entry.id)} style={iconBtn(entry.active ? T.red : T.green)}
