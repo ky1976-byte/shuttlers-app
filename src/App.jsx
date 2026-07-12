@@ -1246,47 +1246,42 @@ function PresetRankedList({ preset, onToggle, notify }) {
   }, [preset.key]);
 
   const dayLabel = dow !== undefined ? Object.keys(DOW_MAP).find((k) => DOW_MAP[k] === dow && k.length > 3) : null;
-  const onList = (r) => preset.member_ids.includes(r.profile_id);
-  // Show a player if they're recently active for this day, OR they're
-  // already on the list — being added shouldn't make someone invisible
-  // just because they haven't played through the app yet (e.g. a
-  // freshly kickstarted list seeded from pre-app history).
-  const visible = (rows || []).filter((r) => r.last20_pct > 0 || onList(r));
+  const rowsById = new Map((rows || []).map((r) => [r.profile_id, r]));
+  // "On this list" respects the exact stored order of member_ids — this
+  // is the order an admin deliberately set (e.g. a manually sequenced
+  // kickstart list), not a re-derived ranking.
+  const onListRows = preset.member_ids.map((id) => rowsById.get(id)).filter(Boolean);
+  const onListMissing = preset.member_ids.length - onListRows.length;
+  // "Suggested" is the ranking/discovery view — only players NOT already
+  // added, with recent attendance for this day, pre-pay first then score.
+  const suggested = (rows || []).filter((r) => r.last20_pct > 0 && !preset.member_ids.includes(r.profile_id));
   const cell = { padding: "8px 4px", fontSize: 13, borderBottom: `1px solid ${T.line}`, minWidth: 0, overflowWrap: "anywhere" };
   const head = { padding: "6px 4px", fontSize: 10.5, color: T.sub, textTransform: "uppercase", letterSpacing: 0.2 };
   const cols = "20px minmax(0,1fr) 46px 46px 40px 58px";
 
-  const group = (status, label) => {
-    const list = visible.filter((r) => r.status === status);
-    if (!list.length) return null;
-    return (
-      <div key={status} style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, background: "#EEF3FA", padding: "5px 8px", borderRadius: 6 }}>{label}</div>
-        <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
-          <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Games</span>
-          <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={{ ...head, textAlign: "right" }}>Score</span><span style={head}></span>
-          {list.map((r, i) => {
-            const on = onList(r);
-            return (
-              <React.Fragment key={r.profile_id}>
-                <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
-                <span style={{ ...cell, fontWeight: 500 }}>{r.name}</span>
-                <span style={{ ...cell, textAlign: "right" }}>{r.total_games}</span>
-                <span style={{ ...cell, textAlign: "right" }}>{r.last20_pct}%</span>
-                <span style={{ ...cell, fontWeight: 700, textAlign: "right" }}>{r.score}</span>
-                <span style={{ ...cell, textAlign: "right" }}>
-                  <Btn small tone={on ? "ghost" : "court"}
-                    onClick={() => onToggle(preset.key, on ? preset.member_ids.filter((x) => x !== r.profile_id) : [...preset.member_ids, r.profile_id])}>
-                    {on ? "✓" : "Add"}
-                  </Btn>
-                </span>
-              </React.Fragment>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
+  const rowCells = (r, i, on) => (
+    <React.Fragment key={r.profile_id}>
+      <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
+      <span style={{ ...cell, fontWeight: 500 }}>{r.name} {r.status !== "member" && <StatusPill status={r.status} />}</span>
+      <span style={{ ...cell, textAlign: "right" }}>{r.total_games}</span>
+      <span style={{ ...cell, textAlign: "right" }}>{r.last20_pct}%</span>
+      <span style={{ ...cell, fontWeight: 700, textAlign: "right" }}>{r.score}</span>
+      <span style={{ ...cell, textAlign: "right" }}>
+        <Btn small tone={on ? "ghost" : "court"}
+          onClick={() => onToggle(preset.key, on ? preset.member_ids.filter((x) => x !== r.profile_id) : [...preset.member_ids, r.profile_id])}>
+          {on ? "Remove" : "Add"}
+        </Btn>
+      </span>
+    </React.Fragment>
+  );
+
+  const table = (list, on) => (
+    <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
+      <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Games</span>
+      <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={{ ...head, textAlign: "right" }}>Score</span><span style={head}></span>
+      {list.map((r, i) => rowCells(r, i, on))}
+    </div>
+  );
 
   return (
     <div style={{ marginBottom: 10, border: `1px solid ${T.line}`, borderRadius: 10, overflow: "hidden" }}>
@@ -1301,15 +1296,25 @@ function PresetRankedList({ preset, onToggle, notify }) {
       {expanded && (
         <div style={{ padding: "10px 12px" }}>
           {dow === undefined && (
-            <div style={{ fontSize: 12, color: T.sub }}>This list's key ("{preset.key}") isn't a recognized weekday, so ranking/suggestions are unavailable — but anyone already added above still applies to games normally. Rename the preset key to a day name (e.g. "saturday") to enable ranking.</div>
+            <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>This list's key ("{preset.key}") isn't a recognized weekday, so ranking/suggestions are unavailable — but the list below still applies to games normally. Rename the preset key to a day name (e.g. "saturday") to enable ranking.</div>
           )}
-          {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading ranking…</div>}
+          {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading…</div>}
+
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 4 }}>On this list</div>
+          {onListRows.length ? table(onListRows, true) : <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>No one added yet.</div>}
+          {onListMissing > 0 && (
+            <div style={{ fontSize: 11, color: T.sub, marginTop: 4 }}>{onListMissing} member{onListMissing > 1 ? "s" : ""} on this list couldn't be matched to a profile — may need a page refresh.</div>
+          )}
+
           {dow !== undefined && !loading && rows && (
             <>
-              <div style={{ fontSize: 11, color: T.sub, marginBottom: 8 }}>Showing players with recent {dayLabel || preset.key} attendance, plus anyone already added to this list. Pre-pay members ranked first.</div>
-              {group("prepay", "Pre-pay")}
-              {group("member", "Member")}
-              {!visible.length && <div style={{ fontSize: 12, color: T.sub }}>No one added yet, and no recent {dayLabel || preset.key} attendance to suggest from.</div>}
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 14, marginBottom: 4 }}>Suggested additions</div>
+              <div style={{ fontSize: 11, color: T.sub, marginBottom: 8 }}>Players not yet on this list with recent {dayLabel || preset.key} attendance. Pre-pay ranked first, then by 50% total games + 50% last-20 appearances.</div>
+              {["prepay", "member"].map((status) => {
+                const list = suggested.filter((r) => r.status === status);
+                return list.length ? <div key={status} style={{ marginBottom: 10 }}>{table(list, false)}</div> : null;
+              })}
+              {!suggested.length && <div style={{ fontSize: 12, color: T.sub }}>No recent {dayLabel || preset.key} attendance to suggest from yet.</div>}
             </>
           )}
         </div>
