@@ -77,13 +77,18 @@ const Screen = ({ children }) => (
 const capacityOf = (g) => g.capacity_override ?? g.courts * g.per_court;
 const isPastCutoff = (g) => Date.now() > new Date(g.starts_at).getTime() - g.cutoff_hours * 3600 * 1000;
 const isPastStart = (g) => Date.now() > new Date(g.starts_at).getTime();
+// All display times are pinned to UAE time (Asia/Dubai, UTC+4, no DST),
+// regardless of the viewing device's own timezone/location — so a
+// member traveling abroad still sees game times exactly as they are
+// in UAE, not shifted to wherever their phone currently thinks it is.
+const UAE_TZ = "Asia/Dubai";
 const fmtDT = (g) => {
   const s = new Date(g.starts_at), e = new Date(g.ends_at);
-  const day = s.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
-  const t = (d) => d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit" });
+  const day = s.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: UAE_TZ });
+  const t = (d) => d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", timeZone: UAE_TZ });
   return `${day} · ${t(s)}–${t(e)}`;
 };
-const fmtDate = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const fmtDate = (d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: UAE_TZ });
 
 function orderedWaitlist(roster) {
   const waits = roster.filter((r) => r.status === "wait");
@@ -559,7 +564,7 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
           {label(r)} {isMine(r) && r.kind === "member" ? "(you)" : ""}
         </span>
         {r.kind === "guest" && <Pill tone="ink">Guest</Pill>}
-        {r.status === "pending" && <Pill tone="gold">Confirm by {new Date(r.pending_until).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</Pill>}
+        {r.status === "pending" && <Pill tone="gold">Confirm by {new Date(r.pending_until).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: UAE_TZ })}</Pill>}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
         {r.status === "pending" && (isMine(r) || isAdmin) && (<Btn small onClick={() => onConfirm(r)}>Confirm</Btn>)}
@@ -945,7 +950,7 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
   const calcClose = +recon.opening + collections + pens - spent;
   const variance = recon.actual_closing == null ? null : +recon.actual_closing - calcClose;
   const cell = { padding: "7px 4px", fontSize: 12, borderBottom: `1px solid ${T.line}` };
-  const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: UAE_TZ });
 
   const exportExcel = async () => {
     const XLSX = await import("xlsx");
@@ -954,8 +959,8 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
     const summaryRows = closed.map((g) => {
       const d = new Date(g.starts_at);
       return {
-        Date: d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }),
-        Day: d.toLocaleDateString("en-GB", { weekday: "long" }),
+        Date: d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: UAE_TZ }),
+        Day: d.toLocaleDateString("en-GB", { weekday: "long", timeZone: UAE_TZ }),
         Courts: g.courts,
         Planned: capacityOf(g),
         Actual: g.actual_players,
@@ -1011,8 +1016,8 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
               const d = new Date(g.starts_at);
               return (
                 <div key={g.id} style={{ display: "grid", gridTemplateColumns: "72px 36px 46px 56px 56px 56px 66px 60px 66px" }}>
-                  <span style={cell}>{d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
-                  <span style={cell}>{d.toLocaleDateString("en-GB", { weekday: "short" })}</span>
+                  <span style={cell}>{d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: UAE_TZ })}</span>
+                  <span style={cell}>{d.toLocaleDateString("en-GB", { weekday: "short", timeZone: UAE_TZ })}</span>
                   <span style={cell}>{g.courts}</span>
                   <span style={cell}>{capacityOf(g)}</span>
                   <span style={cell}>{g.actual_players}</span>
