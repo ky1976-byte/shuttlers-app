@@ -401,10 +401,11 @@ export default function App() {
           <PlayersView profiles={profiles} balances={balances} games={games} onOpen={setOpenPlayer} isAdmin={isAdmin} />
         )}
         {tab === "players" && playerOpen && (
-          <PlayerDetail u={playerOpen} bal={balOf(playerOpen.id)} games={games} isAdmin={isAdmin}
+          <PlayerDetail u={playerOpen} bal={balOf(playerOpen.id)} games={games} isAdmin={isAdmin} isSelf={playerOpen.id === me.id}
             onBack={() => setOpenPlayer(null)}
             onSeed={(field, value) => run(() => supabase.from("profiles").update({ [field]: value }).eq("id", playerOpen.id).then(({ error }) => { if (error) throw error; }))}
-            onOpeningBalance={(amt) => run(() => rpc("seed_opening_balance", { p_user: playerOpen.id, p_amount: amt }), "Opening balance recorded.")} />
+            onOpeningBalance={(amt) => run(() => rpc("seed_opening_balance", { p_user: playerOpen.id, p_amount: amt }), "Opening balance recorded.")}
+            onAwayUntil={(date) => run(() => rpc("set_away_until", { p_profile: playerOpen.id, p_until: date }), date ? `Away until ${date} — skipped from list auto-fill till then.` : "Away date cleared.")} />
         )}
 
         {tab === "ledger" && (
@@ -441,6 +442,7 @@ export default function App() {
               await navigator.clipboard.writeText(link).catch(() => {});
             }, `New link for ${name} copied — the old link no longer works.`)}
             onPreset={(key, member_ids) => run(() => supabase.from("presets").update({ member_ids }).eq("key", key).then(({ error }) => { if (error) throw error; }), "List updated.")}
+            onAwayUntil={(id, date) => run(() => rpc("set_away_until", { p_profile: id, p_until: date }), date ? `Away until ${date} set.` : "Away date cleared.")}
             onMonthCheck={() => run(() => rpc("month_start_prepay_check"), "Month-start pre-pay check completed.")} />
         )}
       </div>
@@ -766,13 +768,15 @@ function PlayersView({ profiles, balances, games, onOpen, isAdmin }) {
   );
 }
 
-function PlayerDetail({ u, bal, games, isAdmin, onBack, onSeed, onOpeningBalance }) {
+function PlayerDetail({ u, bal, games, isAdmin, isSelf, onBack, onSeed, onOpeningBalance, onAwayUntil }) {
   const [seedAmt, setSeedAmt] = useState("");
+  const [awayDate, setAwayDate] = useState(u.away_until || "");
   const recent = games.filter((g) => g.closed && g.roster.some((r) => r.kind === "member" && r.user_id === u.id && r.status === "in"))
     .sort((a, b) => new Date(b.starts_at) - new Date(a.starts_at)).slice(0, 12);
   const apps = appearancesOf(u, games);
   const l20 = last20Pct(u, games);
   const prepayShort = u.status === "prepay" && bal < 150;
+  const isAway = u.away_until && u.away_until >= new Date().toISOString().slice(0, 10);
   return (
     <>
       <button onClick={onBack} style={{ background: "none", border: "none", color: T.court, fontWeight: 600, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 10 }}>← All players</button>
@@ -783,6 +787,7 @@ function PlayerDetail({ u, bal, games, isAdmin, onBack, onSeed, onOpeningBalance
         </div>
         <div style={{ fontSize: 12.5, color: T.sub, marginTop: 2 }}>Joined {fmtDate(u.joined)}{u.phone ? ` · ${u.phone}` : ""}</div>
         {prepayShort && <div style={{ marginTop: 8 }}><Pill tone="red">Below AED 150 — will update to Member at month start</Pill></div>}
+        {isAway && <div style={{ marginTop: 8 }}><Pill tone="gold">✈ Away till {fmtDate(u.away_until)}</Pill></div>}
         <CourtRule />
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
           {[["Balance", `AED ${bal}`, bal < 0 ? T.red : T.green], ["Total games", apps, T.ink], ["Last 20 games", l20 === null ? "—" : l20 + "%", T.ink]].map(([l, v, c]) => (
@@ -800,6 +805,18 @@ function PlayerDetail({ u, bal, games, isAdmin, onBack, onSeed, onOpeningBalance
           </div>
         ))}
         {!recent.length && <div style={{ fontSize: 13, color: T.sub, padding: "8px 0" }}>No closed games in the app yet.</div>}
+
+        {(isAdmin || isSelf) && (
+          <div style={{ marginTop: 18, borderTop: `2px solid ${T.line}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8 }}>{isSelf && !isAdmin ? "TRAVEL" : "AWAY"}</div>
+            <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 6 }}>Set a return date to skip {isSelf && !isAdmin ? "yourself" : "this player"} from predefined-list auto-fill until then — {isSelf && !isAdmin ? "you stay" : "they stay"} on the list itself, just not auto-added to games in the meantime.</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input type="date" value={awayDate} onChange={(e) => setAwayDate(e.target.value)} style={{ ...inputStyle, width: 150 }} />
+              <Btn small onClick={() => awayDate && onAwayUntil(awayDate)}>Set</Btn>
+              {u.away_until && <Btn small tone="ghost" onClick={() => { setAwayDate(""); onAwayUntil(null); }}>Clear</Btn>}
+            </div>
+          </div>
+        )}
 
         {isAdmin && (
           <div style={{ marginTop: 18, borderTop: `2px solid ${T.line}`, paddingTop: 14 }}>
@@ -1063,7 +1080,7 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
 
 /* ---------------- admin ---------------- */
 
-function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate, onInvite, onRevoke, onStatus, onRegenerate, onPreset, onMonthCheck, notify }) {
+function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate, onInvite, onRevoke, onStatus, onRegenerate, onPreset, onAwayUntil, onMonthCheck, notify }) {
   const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", ends: "", courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
   const [inv, setInv] = useState({ name: "", phone: "", admin: false, link: "" });
   const [sub, setSub] = useState("games");
@@ -1171,26 +1188,31 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
           <Btn small tone="ghost" onClick={onMonthCheck}>⏱ Run month-start pre-pay check now</Btn>
           <div style={{ fontSize: 11.5, color: T.sub, marginTop: 4 }}>Runs automatically on the 1st of every month: any pre-pay member under AED 150 auto-updates to Member.</div>
         </div>
-        {profiles.map((u) => (
+        {profiles.map((u) => {
+          const isAway = u.away_until && u.away_until >= new Date().toISOString().slice(0, 10);
+          return (
           <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: `1px solid ${T.line}`, gap: 8, flexWrap: "wrap" }}>
             <div>
               <span style={{ fontSize: 14, fontWeight: 500, textDecoration: u.revoked ? "line-through" : "none", opacity: u.revoked ? 0.5 : 1 }}>{u.name}</span>
               {u.is_admin && <span style={{ marginLeft: 8 }}><Pill tone="court">Admin</Pill></span>}
               <span style={{ marginLeft: 8 }}><StatusPill status={u.status} /></span>
               {u.revoked && <span style={{ marginLeft: 8 }}><Pill tone="red">Revoked</Pill></span>}
+              {isAway && <span style={{ marginLeft: 8 }}><Pill tone="gold">✈ Till {fmtDate(u.away_until)}</Pill></span>}
               {u.phone && <div style={{ fontSize: 11.5, color: T.sub }}>{u.phone}</div>}
             </div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               <select value={u.status} onChange={(e) => onStatus(u.id, e.target.value)} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12 }}>
                 <option value="member">Member</option><option value="prepay">Pre-pay</option><option value="explayer">Ex-player</option>
               </select>
+              <input type="date" value={u.away_until || ""} onChange={(e) => onAwayUntil(u.id, e.target.value || null)} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12, width: 128 }} title="Away until — skips list auto-fill" />
               <Btn small tone="ghost" onClick={() => onRegenerate(u.id, u.name)}>🔄 Regenerate link</Btn>
               {u.id !== me.id && (
                 <Btn small tone={u.revoked ? "ghost" : "red"} onClick={() => onRevoke(u.id, !u.revoked)}>{u.revoked ? "Re-approve" : "Revoke"}</Btn>
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </Card>
       </>)}
 
@@ -1199,7 +1221,7 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Predefined player lists</div>
         <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Selecting a list when creating a game auto-confirms these players onto the roster. Tap a day to expand it — each shows only players with at least 1 appearance in that day's last 20 games, pre-pay members ranked first, then by 50% total games + 50% last-20 appearances.</div>
         {sortedPresets(presets).map((p) => (
-          <PresetRankedList key={p.key} preset={p} onToggle={onPreset} notify={notify} />
+          <PresetRankedList key={p.key} preset={p} profiles={profiles} onToggle={onPreset} notify={notify} />
         ))}
       </Card>
       )}
@@ -1241,7 +1263,7 @@ const DOW_MAP = {
   sat: 6, saturday: 6,
 };
 
-function PresetRankedList({ preset, onToggle, notify }) {
+function PresetRankedList({ preset, profiles, onToggle, notify }) {
   const [rows, setRows] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -1258,6 +1280,8 @@ function PresetRankedList({ preset, onToggle, notify }) {
     return () => { cancelled = true; };
   }, [preset.key]);
 
+  const today = new Date().toISOString().slice(0, 10);
+  const awayById = new Map((profiles || []).filter((p) => p.away_until && p.away_until >= today).map((p) => [p.id, p.away_until]));
   const dayLabel = dow !== undefined ? Object.keys(DOW_MAP).find((k) => DOW_MAP[k] === dow && k.length > 3) : null;
   const rowsById = new Map((rows || []).map((r) => [r.profile_id, r]));
   // "On this list" respects the exact stored order of member_ids — this
@@ -1280,7 +1304,10 @@ function PresetRankedList({ preset, onToggle, notify }) {
   const rowCells = (r, i, on) => (
     <React.Fragment key={r.profile_id}>
       <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
-      <span style={{ ...cell, fontWeight: 500 }}>{r.name} {r.status !== "member" && <StatusPill status={r.status} />}</span>
+      <span style={{ ...cell, fontWeight: 500 }}>
+        {r.name} {r.status !== "member" && <StatusPill status={r.status} />}
+        {awayById.has(r.profile_id) && <span style={{ marginLeft: 4 }}><Pill tone="gold">✈ till {fmtDate(awayById.get(r.profile_id))}</Pill></span>}
+      </span>
       <span style={{ ...cell, textAlign: "right" }}>{r.total_games}</span>
       <span style={{ ...cell, textAlign: "right" }}>{r.last20_pct}%</span>
       <span style={{ ...cell, fontWeight: 700, textAlign: "right" }}>{r.score}</span>
