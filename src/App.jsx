@@ -1246,13 +1246,18 @@ function PresetRankedList({ preset, onToggle, notify }) {
   }, [preset.key]);
 
   const dayLabel = dow !== undefined ? Object.keys(DOW_MAP).find((k) => DOW_MAP[k] === dow && k.length > 3) : null;
-  const eligible = (rows || []).filter((r) => r.last20_pct > 0);
+  const onList = (r) => preset.member_ids.includes(r.profile_id);
+  // Show a player if they're recently active for this day, OR they're
+  // already on the list — being added shouldn't make someone invisible
+  // just because they haven't played through the app yet (e.g. a
+  // freshly kickstarted list seeded from pre-app history).
+  const visible = (rows || []).filter((r) => r.last20_pct > 0 || onList(r));
   const cell = { padding: "8px 4px", fontSize: 13, borderBottom: `1px solid ${T.line}`, minWidth: 0, overflowWrap: "anywhere" };
   const head = { padding: "6px 4px", fontSize: 10.5, color: T.sub, textTransform: "uppercase", letterSpacing: 0.2 };
   const cols = "20px minmax(0,1fr) 46px 46px 40px 58px";
 
   const group = (status, label) => {
-    const list = eligible.filter((r) => r.status === status);
+    const list = visible.filter((r) => r.status === status);
     if (!list.length) return null;
     return (
       <div key={status} style={{ marginBottom: 10 }}>
@@ -1261,7 +1266,7 @@ function PresetRankedList({ preset, onToggle, notify }) {
           <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Games</span>
           <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={{ ...head, textAlign: "right" }}>Score</span><span style={head}></span>
           {list.map((r, i) => {
-            const on = preset.member_ids.includes(r.profile_id);
+            const on = onList(r);
             return (
               <React.Fragment key={r.profile_id}>
                 <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
@@ -1289,22 +1294,22 @@ function PresetRankedList({ preset, onToggle, notify }) {
         style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F8FAFD", border: "none", padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
         <span style={{ fontSize: 13.5, fontWeight: 700 }}>{preset.label}</span>
         <span style={{ fontSize: 12, color: T.sub, display: "flex", alignItems: "center", gap: 6 }}>
-          {dow === undefined ? "not rankable" : loading ? "loading…" : `${eligible.length} eligible`}
+          {`${preset.member_ids.length} on list`}
           <span style={{ fontSize: 10 }}>{expanded ? "▾" : "▸"}</span>
         </span>
       </button>
       {expanded && (
         <div style={{ padding: "10px 12px" }}>
           {dow === undefined && (
-            <div style={{ fontSize: 12, color: T.sub }}>This list's key ("{preset.key}") isn't a recognized weekday, so it can't be ranked. Rename the preset key to a day name (e.g. "saturday") to enable ranking.</div>
+            <div style={{ fontSize: 12, color: T.sub }}>This list's key ("{preset.key}") isn't a recognized weekday, so ranking/suggestions are unavailable — but anyone already added above still applies to games normally. Rename the preset key to a day name (e.g. "saturday") to enable ranking.</div>
           )}
           {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading ranking…</div>}
           {dow !== undefined && !loading && rows && (
             <>
-              <div style={{ fontSize: 11, color: T.sub, marginBottom: 8 }}>Showing only players with at least 1 appearance in the last 20 {dayLabel || preset.key} games. Pre-pay members ranked first.</div>
+              <div style={{ fontSize: 11, color: T.sub, marginBottom: 8 }}>Showing players with recent {dayLabel || preset.key} attendance, plus anyone already added to this list. Pre-pay members ranked first.</div>
               {group("prepay", "Pre-pay")}
               {group("member", "Member")}
-              {!eligible.length && <div style={{ fontSize: 12, color: T.sub }}>No one has attended a {dayLabel || preset.key} game in the last 20 yet.</div>}
+              {!visible.length && <div style={{ fontSize: 12, color: T.sub }}>No one added yet, and no recent {dayLabel || preset.key} attendance to suggest from.</div>}
             </>
           )}
         </div>
