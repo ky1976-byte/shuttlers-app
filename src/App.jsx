@@ -1198,13 +1198,26 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
       <Card>
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Predefined player lists</div>
         <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Selecting a list when creating a game auto-confirms these players onto the roster. Tap a day to expand it — each shows only players with at least 1 appearance in that day's last 20 games, pre-pay members ranked first, then by 50% total games + 50% last-20 appearances.</div>
-        {presets.map((p) => (
+        {sortedPresets(presets).map((p) => (
           <PresetRankedList key={p.key} preset={p} onToggle={onPreset} notify={notify} />
         ))}
       </Card>
       )}
     </>
   );
+}
+
+/* Fixed display order: Saturday, Tuesday, Thursday first (regardless of
+   whatever order Supabase happens to return them in — that order isn't
+   guaranteed to stay stable across fetches), any other/future list after,
+   alphabetically. */
+const LIST_DAY_PRIORITY = { sat: 0, saturday: 0, tue: 1, tuesday: 1, thu: 2, thursday: 2 };
+function sortedPresets(presets) {
+  return [...presets].sort((a, b) => {
+    const pa = LIST_DAY_PRIORITY[a.key.toLowerCase()] ?? 99;
+    const pb = LIST_DAY_PRIORITY[b.key.toLowerCase()] ?? 99;
+    return pa !== pb ? pa - pb : a.label.localeCompare(b.label);
+  });
 }
 
 /* Ranked list-builder for one predefined list (e.g. Saturday). Pulls the
@@ -1257,7 +1270,12 @@ function PresetRankedList({ preset, onToggle, notify }) {
   const suggested = (rows || []).filter((r) => r.last20_pct > 0 && !preset.member_ids.includes(r.profile_id));
   const cell = { padding: "8px 4px", fontSize: 13, borderBottom: `1px solid ${T.line}`, minWidth: 0, overflowWrap: "anywhere" };
   const head = { padding: "6px 4px", fontSize: 10.5, color: T.sub, textTransform: "uppercase", letterSpacing: 0.2 };
-  const cols = "20px minmax(0,1fr) 46px 46px 40px 58px";
+  const cols = "20px minmax(0,1fr) 46px 46px 40px 32px";
+  const iconBtn = (color) => ({
+    width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${color}`, background: "transparent",
+    color, fontSize: 13, fontWeight: 800, lineHeight: 1, cursor: "pointer", display: "inline-flex",
+    alignItems: "center", justifyContent: "center", padding: 0,
+  });
 
   const rowCells = (r, i, on) => (
     <React.Fragment key={r.profile_id}>
@@ -1267,10 +1285,12 @@ function PresetRankedList({ preset, onToggle, notify }) {
       <span style={{ ...cell, textAlign: "right" }}>{r.last20_pct}%</span>
       <span style={{ ...cell, fontWeight: 700, textAlign: "right" }}>{r.score}</span>
       <span style={{ ...cell, textAlign: "right" }}>
-        <Btn small tone={on ? "ghost" : "court"}
-          onClick={() => onToggle(preset.key, on ? preset.member_ids.filter((x) => x !== r.profile_id) : [...preset.member_ids, r.profile_id])}>
-          {on ? "Remove" : "Add"}
-        </Btn>
+        <button
+          onClick={() => onToggle(preset.key, on ? preset.member_ids.filter((x) => x !== r.profile_id) : [...preset.member_ids, r.profile_id])}
+          style={iconBtn(on ? T.red : T.green)}
+          aria-label={on ? `Remove ${r.name} from list` : `Add ${r.name} to list`}>
+          {on ? "✕" : "✓"}
+        </button>
       </span>
     </React.Fragment>
   );
