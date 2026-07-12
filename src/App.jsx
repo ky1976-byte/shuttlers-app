@@ -880,10 +880,10 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
             {active.map((u) => {
               const b = balances.find((x) => x.user_id === u.id)?.balance ?? 0;
               return (
-                <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${T.line}`, gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 14 }}>{u.name}{u.is_admin ? " ⭐" : ""}</span>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <span style={{ fontWeight: 700, color: b < 0 ? T.red : b > 0 ? T.green : T.ink, fontSize: 14, minWidth: 70, textAlign: "right" }}>AED {b}</span>
+                <div key={u.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 0", borderBottom: `1px solid ${T.line}` }}>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>{u.name}{u.is_admin ? " ⭐" : ""}</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontWeight: 700, color: b < 0 ? T.red : b > 0 ? T.green : T.ink, fontSize: 14, minWidth: 70 }}>AED {b}</span>
                     <input type="number" placeholder="AED" value={amounts[u.id] || ""} onChange={(ev) => setAmounts({ ...amounts, [u.id]: ev.target.value })} style={{ ...inputStyle, width: 70, padding: "6px 8px" }} />
                     <Btn small tone="ghost" onClick={() => { onPay(u.id, +amounts[u.id]); setAmounts({ ...amounts, [u.id]: "" }); }}>Record</Btn>
                   </div>
