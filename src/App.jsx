@@ -441,7 +441,7 @@ export default function App() {
               const link = `${window.location.origin}/?invite=${token}`;
               await navigator.clipboard.writeText(link).catch(() => {});
             }, `New link for ${name} copied — the old link no longer works.`)}
-            onPreset={(key, member_ids) => run(() => supabase.from("presets").update({ member_ids }).eq("key", key).then(({ error }) => { if (error) throw error; }), "List updated.")}
+            onPreset={(key, members) => run(() => supabase.from("presets").update({ members }).eq("key", key).then(({ error }) => { if (error) throw error; }), "List updated.")}
             onAwayUntil={(id, date) => run(() => rpc("set_away_until", { p_profile: id, p_until: date }), date ? `Away until ${date} set.` : "Away date cleared.")}
             onMonthCheck={() => run(() => rpc("month_start_prepay_check"), "Month-start pre-pay check completed.")} />
         )}
@@ -1138,7 +1138,7 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
             <label style={lbl}>Prefill roster from predefined list (auto-confirmed)</label>
             <select style={input} value={f.preset} onChange={(e) => setF({ ...f, preset: e.target.value })}>
               <option value="">— none —</option>
-              {presets.map((p) => <option key={p.key} value={p.key}>{p.label} ({p.member_ids.length} players)</option>)}
+              {presets.map((p) => <option key={p.key} value={p.key}>{p.label} ({(p.members || []).filter((m) => m.active).length} players)</option>)}
             </select>
             <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>
               <input type="checkbox" checked={f.recurring} onChange={(e) => setF({ ...f, recurring: e.target.checked })} />
@@ -1284,51 +1284,49 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
   const awayById = new Map((profiles || []).filter((p) => p.away_until && p.away_until >= today).map((p) => [p.id, p.away_until]));
   const dayLabel = dow !== undefined ? Object.keys(DOW_MAP).find((k) => DOW_MAP[k] === dow && k.length > 3) : null;
   const rowsById = new Map((rows || []).map((r) => [r.profile_id, r]));
-  // "On this list" respects the exact stored order of member_ids — this
-  // is the order an admin deliberately set (e.g. a manually sequenced
-  // kickstart list), not a re-derived ranking.
-  const onListRows = preset.member_ids.map((id) => rowsById.get(id)).filter(Boolean);
-  const onListMissing = preset.member_ids.length - onListRows.length;
-  // "Suggested" is the ranking/discovery view — only players NOT already
-  // added, with recent attendance for this day, pre-pay first then score.
-  const suggested = (rows || []).filter((r) => r.last20_pct > 0 && !preset.member_ids.includes(r.profile_id));
+
+  const members = preset.members || [];
+  const membersSorted = [...members].sort((a, b) => a.order - b.order);
+  const memberIds = new Set(members.map((m) => m.id));
+  const onListEntries = membersSorted.map((m) => ({ ...m, row: rowsById.get(m.id) })).filter((e) => e.row);
+  const onListMissing = membersSorted.length - onListEntries.length;
+  const activeCount = membersSorted.filter((m) => m.active).length;
+
+  // "Suggested" is the discovery view — only people not on the list at
+  // all, with recent attendance for this day, pre-pay first then score.
+  const suggested = (rows || []).filter((r) => r.last20_pct > 0 && !memberIds.has(r.profile_id));
+
+  const saveMembers = (next) => onToggle(preset.key, next);
+  const reorder = (newIndex, id) => {
+    const current = [...membersSorted];
+    const oldIndex = current.findIndex((m) => m.id === id);
+    if (oldIndex === -1 || oldIndex === newIndex) return;
+    const [item] = current.splice(oldIndex, 1);
+    current.splice(Math.max(0, Math.min(newIndex, current.length)), 0, item);
+    saveMembers(current.map((m, i) => ({ id: m.id, active: m.active, order: i + 1 })));
+  };
+  const toggleActive = (id) => saveMembers(membersSorted.map((m) => (m.id === id ? { ...m, active: !m.active } : m)));
+  const addMember = (id) => {
+    const maxOrder = membersSorted.reduce((mx, m) => Math.max(mx, m.order), 0);
+    saveMembers([...membersSorted, { id, active: true, order: maxOrder + 1 }]);
+  };
+
   const cell = { padding: "8px 4px", fontSize: 13, borderBottom: `1px solid ${T.line}`, minWidth: 0, overflowWrap: "anywhere" };
   const head = { padding: "6px 4px", fontSize: 10.5, color: T.sub, textTransform: "uppercase", letterSpacing: 0.2 };
-  const cols = "20px minmax(0,1fr) 46px 46px 40px 32px";
   const iconBtn = (color) => ({
     width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${color}`, background: "transparent",
     color, fontSize: 13, fontWeight: 800, lineHeight: 1, cursor: "pointer", display: "inline-flex",
     alignItems: "center", justifyContent: "center", padding: 0,
   });
-
-  const rowCells = (r, i, on) => (
-    <React.Fragment key={r.profile_id}>
-      <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
-      <span style={{ ...cell, fontWeight: 500 }}>
-        {r.name} {r.status !== "member" && <StatusPill status={r.status} />}
-        {awayById.has(r.profile_id) && <span style={{ marginLeft: 4 }}><Pill tone="gold">✈ till {fmtDate(awayById.get(r.profile_id))}</Pill></span>}
-      </span>
-      <span style={{ ...cell, textAlign: "right" }}>{r.total_games}</span>
-      <span style={{ ...cell, textAlign: "right" }}>{r.last20_pct}%</span>
-      <span style={{ ...cell, fontWeight: 700, textAlign: "right" }}>{r.score}</span>
-      <span style={{ ...cell, textAlign: "right" }}>
-        <button
-          onClick={() => onToggle(preset.key, on ? preset.member_ids.filter((x) => x !== r.profile_id) : [...preset.member_ids, r.profile_id])}
-          style={iconBtn(on ? T.red : T.green)}
-          aria-label={on ? `Remove ${r.name} from list` : `Add ${r.name} to list`}>
-          {on ? "✕" : "✓"}
-        </button>
-      </span>
-    </React.Fragment>
+  const nameCell = (r, dim) => (
+    <span style={{ ...cell, fontWeight: 500, opacity: dim ? 0.55 : 1 }}>
+      {r.name} {r.status !== "member" && <StatusPill status={r.status} />}
+      {awayById.has(r.profile_id) && <span style={{ marginLeft: 4 }}><Pill tone="gold">✈ till {fmtDate(awayById.get(r.profile_id))}</Pill></span>}
+    </span>
   );
 
-  const table = (list, on) => (
-    <div style={{ display: "grid", gridTemplateColumns: cols, gap: 4 }}>
-      <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Games</span>
-      <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={{ ...head, textAlign: "right" }}>Score</span><span style={head}></span>
-      {list.map((r, i) => rowCells(r, i, on))}
-    </div>
-  );
+  const onListCols = "20px minmax(0,1fr) 76px 30px";
+  const suggestedCols = "20px minmax(0,1fr) 46px 46px 40px 32px";
 
   return (
     <div style={{ marginBottom: 10, border: `1px solid ${T.line}`, borderRadius: 10, overflow: "hidden" }}>
@@ -1336,7 +1334,7 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
         style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#F8FAFD", border: "none", padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
         <span style={{ fontSize: 13.5, fontWeight: 700 }}>{preset.label}</span>
         <span style={{ fontSize: 12, color: T.sub, display: "flex", alignItems: "center", gap: 6 }}>
-          {`${preset.member_ids.length} on list`}
+          {`${activeCount} on list${membersSorted.length > activeCount ? ` (${membersSorted.length - activeCount} paused)` : ""}`}
           <span style={{ fontSize: 10 }}>{expanded ? "▾" : "▸"}</span>
         </span>
       </button>
@@ -1347,8 +1345,32 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
           )}
           {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading…</div>}
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 4 }}>On this list</div>
-          {onListRows.length ? table(onListRows, true) : <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>No one added yet.</div>}
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 2 }}>On this list</div>
+          <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>Drag a slider to reorder. ✕ pauses someone without removing them — they stay right here, ready to re-add with ✓. When a game has fewer spots than active people here, the lowest-priority names waitlist automatically.</div>
+          {onListEntries.length ? (
+            <div style={{ display: "grid", gridTemplateColumns: onListCols, gap: 4 }}>
+              <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Order</span><span style={head}></span>
+              {onListEntries.map((entry, i) => (
+                <React.Fragment key={entry.id}>
+                  <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
+                  {nameCell(entry.row, !entry.active)}
+                  <span style={{ ...cell, textAlign: "right" }}>
+                    <input type="range" min={1} max={onListEntries.length} defaultValue={i + 1}
+                      key={`${entry.id}-${entry.order}`}
+                      onMouseUp={(e) => reorder(+e.target.value - 1, entry.id)}
+                      onTouchEnd={(e) => reorder(+e.target.value - 1, entry.id)}
+                      style={{ width: 68 }} aria-label={`Reorder ${entry.row.name}`} />
+                  </span>
+                  <span style={{ ...cell, textAlign: "right" }}>
+                    <button onClick={() => toggleActive(entry.id)} style={iconBtn(entry.active ? T.red : T.green)}
+                      aria-label={entry.active ? `Pause ${entry.row.name}` : `Re-add ${entry.row.name}`}>
+                      {entry.active ? "✕" : "✓"}
+                    </button>
+                  </span>
+                </React.Fragment>
+              ))}
+            </div>
+          ) : <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>No one added yet.</div>}
           {onListMissing > 0 && (
             <div style={{ fontSize: 11, color: T.sub, marginTop: 4 }}>{onListMissing} member{onListMissing > 1 ? "s" : ""} on this list couldn't be matched to a profile — may need a page refresh.</div>
           )}
@@ -1359,7 +1381,25 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
               <div style={{ fontSize: 11, color: T.sub, marginBottom: 8 }}>Players not yet on this list with recent {dayLabel || preset.key} attendance. Pre-pay ranked first, then by 50% total games + 50% last-20 appearances.</div>
               {["prepay", "member"].map((status) => {
                 const list = suggested.filter((r) => r.status === status);
-                return list.length ? <div key={status} style={{ marginBottom: 10 }}>{table(list, false)}</div> : null;
+                if (!list.length) return null;
+                return (
+                  <div key={status} style={{ marginBottom: 10, display: "grid", gridTemplateColumns: suggestedCols, gap: 4 }}>
+                    <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Games</span>
+                    <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span><span style={{ ...head, textAlign: "right" }}>Score</span><span style={head}></span>
+                    {list.map((r, i) => (
+                      <React.Fragment key={r.profile_id}>
+                        <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
+                        {nameCell(r, false)}
+                        <span style={{ ...cell, textAlign: "right" }}>{r.total_games}</span>
+                        <span style={{ ...cell, textAlign: "right" }}>{r.last20_pct}%</span>
+                        <span style={{ ...cell, fontWeight: 700, textAlign: "right" }}>{r.score}</span>
+                        <span style={{ ...cell, textAlign: "right" }}>
+                          <button onClick={() => addMember(r.profile_id)} style={iconBtn(T.green)} aria-label={`Add ${r.name} to list`}>✓</button>
+                        </span>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                );
               })}
               {!suggested.length && <div style={{ fontSize: 12, color: T.sub }}>No recent {dayLabel || preset.key} attendance to suggest from yet.</div>}
             </>
