@@ -301,6 +301,14 @@ export default function App() {
       <div style={{ fontSize: 13, opacity: 0.8, marginTop: 8 }}>
         This app is invite-only. Ask a club admin (Assad, Mustafa or Anil) to send you a one-time invite link on WhatsApp, then open it on this device — you'll stay signed in.
       </div>
+      <div style={{ marginTop: 18, textAlign: "left", background: "#0A2450", border: "1px solid #2A4E8F", borderRadius: 10, padding: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>📱 On iPhone? Add to Home Screen first</div>
+        <div style={{ fontSize: 11.5, opacity: 0.85, lineHeight: 1.5 }}>
+          Before opening your invite link, tap <b>Share → Add to Home Screen</b> right here in Safari. Then open the new icon and open (or paste) your invite link from there.
+          <br /><br />
+          Opening the link in Safari first uses it up there — it won't work again on the Home Screen icon afterward.
+        </div>
+      </div>
       <div style={{ marginTop: 20, textAlign: "left" }}>
         <div style={{ fontSize: 11.5, opacity: 0.75, marginBottom: 6 }}>
           Already have a link? Paste it below — useful if this is a home screen icon that isn't picking up the link automatically.
@@ -311,7 +319,12 @@ export default function App() {
           placeholder="Paste invite link or code"
           style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #2A4E8F", background: "#0A2450", color: "#fff", fontSize: 13 }}
         />
-        {inviteError && <div style={{ color: "#FFB4A0", fontSize: 12, marginTop: 6 }}>{inviteError}</div>}
+        {inviteError && (
+          <div style={{ color: "#FFB4A0", fontSize: 12, marginTop: 6 }}>
+            {inviteError}
+            {/invalid|used/i.test(inviteError) && " — this link was already opened somewhere else (often Safari, before adding to Home Screen). Ask your admin for a fresh one."}
+          </div>
+        )}
         <button
           disabled={inviteBusy}
           onClick={() => redeemInvite(inviteInput)}
@@ -434,8 +447,17 @@ export default function App() {
               try {
                 const token = await rpc("create_invite", { p_name: name, p_phone: phone, p_admin: admin });
                 const link = `${window.location.origin}/?invite=${token}`;
-                await navigator.clipboard.writeText(link).catch(() => {});
-                notify(`Invite link for ${name} copied — share it on WhatsApp.`);
+                const bare = window.location.origin;
+                const message = `🏸 Welcome to Shuttlers Club!\n\n` +
+                  `📱 iPhone: don't tap the link below yet —\n` +
+                  `1. Open Safari and go to: ${bare}\n` +
+                  `2. Tap Share → Add to Home Screen\n` +
+                  `3. Open the new icon from your Home Screen\n` +
+                  `4. Paste this link into it: ${link}\n\n` +
+                  `🤖 Android: just tap this link — ${link}\n\n` +
+                  `Questions? Ask Assad, Mustafa or Anil.`;
+                await navigator.clipboard.writeText(message).catch(() => {});
+                notify(`Invite message for ${name} copied — paste it straight into WhatsApp.`);
                 return link;
               } catch (e) { notify(e.message); }
             }}
