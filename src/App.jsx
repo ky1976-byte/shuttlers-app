@@ -579,16 +579,16 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
   }, [matches]);
 
   const Row = ({ r, i }) => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${T.line}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: font.display, fontWeight: 800, fontSize: 12, color: T.sub, width: 18 }}>{i + 1}</span>
-        <span style={{ fontSize: 14, fontWeight: isMine(r) && r.kind === "member" ? 700 : 500 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", rowGap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", minWidth: 0, flex: "1 1 220px" }}>
+        <span style={{ fontFamily: font.display, fontWeight: 800, fontSize: 12, color: T.sub, width: 18, flexShrink: 0 }}>{i + 1}</span>
+        <span style={{ fontSize: 14, fontWeight: isMine(r) && r.kind === "member" ? 700 : 500, overflowWrap: "anywhere", minWidth: 0 }}>
           {label(r)} {isMine(r) && r.kind === "member" ? "(you)" : ""}
         </span>
         {r.kind === "guest" && <Pill tone="ink">Guest</Pill>}
         {r.status === "pending" && <Pill tone="gold">Confirm by {new Date(r.pending_until).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: UAE_TZ })}</Pill>}
       </div>
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
         {r.status === "pending" && (isMine(r) || isAdmin) && (<Btn small onClick={() => onConfirm(r)}>Confirm</Btn>)}
         {r.status === "pending" && (isMine(r) || isAdmin) && !pastStart && (<Btn small tone="red" onClick={() => onDecline(r)}>Decline</Btn>)}
         {(isMine(r) || isAdmin) && r.status !== "pending" && !game.closed && !pastStart && (
