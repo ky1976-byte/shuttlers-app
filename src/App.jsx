@@ -618,10 +618,10 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
               <input style={input} value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="Venue, area" />
               <label style={lbl}>Google Maps link (optional)</label>
               <input style={input} value={f.map_link} onChange={(e) => setF({ ...f, map_link: e.target.value })} placeholder="https://maps.google.com/..." />
-              <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 1 }}><label style={lbl}>Starts</label><input type="datetime-local" style={input} value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} /></div>
-                <div style={{ flex: 1 }}><label style={lbl}>Ends</label><input type="datetime-local" style={input} value={f.ends} onChange={(e) => setF({ ...f, ends: e.target.value })} /></div>
-              </div>
+              <label style={lbl}>Starts</label>
+              <input type="datetime-local" style={input} value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} />
+              <label style={lbl}>Ends</label>
+              <input type="datetime-local" style={input} value={f.ends} onChange={(e) => setF({ ...f, ends: e.target.value })} />
               <div style={{ display: "flex", gap: 10 }}>
                 <div style={{ flex: 1 }}><label style={lbl}>Courts</label><input type="number" style={input} value={f.courts} onChange={(e) => setF({ ...f, courts: +e.target.value })} /></div>
                 <div style={{ flex: 1 }}><label style={lbl}>Players / court</label><input type="number" style={input} value={f.per_court} onChange={(e) => setF({ ...f, per_court: +e.target.value })} /></div>
