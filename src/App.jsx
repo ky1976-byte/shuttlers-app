@@ -767,7 +767,7 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
         {!game.closed && (
           <>
             <SectionHead color={T.amber}>WAITLIST ({waits.length})</SectionHead>
-            <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 4 }}>Members promoted immediately as spots open (12h confirmation window). Guests are only promoted after the cutoff passes.</div>
+            <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 4 }}>Members are auto-promoted the moment a spot opens — no confirmation needed. Guests are only promoted after the cutoff passes, then have 12h to confirm.</div>
             {waits.map((r, i) => <Row key={r.id} r={r} i={i} />)}
             {!waits.length && <div style={{ fontSize: 13, color: T.sub, padding: "8px 0" }}>Waitlist is empty.</div>}
 
@@ -1006,7 +1006,9 @@ function PlayerDetail({ u, bal, games, isAdmin, isSelf, onBack, onSeed, onOpenin
 
 function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf, onPay, onTransfer }) {
   const [amounts, setAmounts] = useState({});
+  const [ledgerQ, setLedgerQ] = useState("");
   const active = profiles.filter((u) => !u.revoked && u.status !== "explayer");
+  const ledgerRows = active.filter((u) => u.name.toLowerCase().includes(ledgerQ.trim().toLowerCase()));
   const [tf, setTf] = useState({ from: "", to: "", amt: "" });
   const myBal = balances.find((b) => b.user_id === me.id)?.balance ?? 0;
   const receivable = balances.reduce((s, b) => s + (b.balance < 0 ? -b.balance : 0), 0);
@@ -1056,7 +1058,13 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
           <Card style={{ marginBottom: 14 }}>
             <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 4 }}>Member ledger (admin)</div>
             <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Enter any amount received — partial or overpayment (credit).</div>
-            {active.map((u) => {
+            <input
+              value={ledgerQ}
+              onChange={(e) => setLedgerQ(e.target.value)}
+              placeholder="Search members…"
+              style={{ ...inputStyle, width: "100%", marginBottom: 10 }}
+            />
+            {ledgerRows.map((u) => {
               const b = balances.find((x) => x.user_id === u.id)?.balance ?? 0;
               return (
                 <div key={u.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 0", borderBottom: `1px solid ${T.line}` }}>
@@ -1069,6 +1077,7 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
                 </div>
               );
             })}
+            {!ledgerRows.length && <div style={{ fontSize: 13, color: T.sub, padding: "12px 0", textAlign: "center" }}>No members match "{ledgerQ}".</div>}
           </Card>
 
           <Card>
