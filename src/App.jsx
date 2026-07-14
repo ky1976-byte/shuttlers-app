@@ -62,6 +62,57 @@ const StatusPill = ({ status }) =>
   status === "explayer" ? <Pill tone="ink">Ex-player</Pill> :
   <Pill tone="court">Member</Pill>;
 
+/* iOS-Contacts-style A-Z index. Tap or drag a finger down the rail to
+   jump the page to the first name starting with that letter. Letters
+   with no matching name are shown dimmed and inert. `refs` is a
+   useRef({}) map of profile id -> row DOM node, populated by the
+   caller via a ref callback on each row. */
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+function AlphabetRail({ profiles, refs }) {
+  const firstIdForLetter = useMemo(() => {
+    const map = new Map();
+    for (const u of profiles) {
+      const l = (u.name?.[0] || "").toUpperCase();
+      if (/[A-Z]/.test(l) && !map.has(l)) map.set(l, u.id);
+    }
+    return map;
+  }, [profiles]);
+
+  const jump = (letter) => {
+    const id = firstIdForLetter.get(letter);
+    const el = id && refs.current[id];
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handleTouch = (e) => {
+    const touch = e.touches[0];
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const letter = el?.getAttribute("data-letter");
+    if (letter) jump(letter);
+  };
+
+  return (
+    <div
+      onTouchMove={handleTouch}
+      style={{
+        position: "fixed", right: 2, top: "50%", transform: "translateY(-50%)", zIndex: 20,
+        display: "flex", flexDirection: "column", alignItems: "center",
+        background: "rgba(255,255,255,0.9)", borderRadius: 10, padding: "4px 3px",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+      }}>
+      {ALPHABET.map((l) => {
+        const has = firstIdForLetter.has(l);
+        return (
+          <span key={l} data-letter={l} onClick={() => has && jump(l)}
+            style={{ fontSize: 9, fontWeight: 700, lineHeight: "12px", color: has ? T.court : "#D3DAE6", padding: "0 3px", cursor: has ? "pointer" : "default", userSelect: "none" }}>
+            {l}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 const Screen = ({ children }) => (
   <div style={{ fontFamily: font.body, background: T.courtDark, minHeight: "100vh", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
     <div style={{ maxWidth: 420, textAlign: "center" }}>
@@ -762,9 +813,11 @@ function last20Pct(u, games) {
 }
 
 function PlayersView({ profiles, balances, games, onOpen, isAdmin }) {
+  const [q, setQ] = useState("");
   const balOf = (id) => balances.find((b) => b.user_id === id)?.balance ?? 0;
   const rows = profiles
     .filter((u) => !u.revoked)
+    .filter((u) => u.name.toLowerCase().includes(q.trim().toLowerCase()))
     .map((u) => ({ ...u, apps: appearancesOf(u, games), bal: balOf(u.id), l20: last20Pct(u, games) }))
     .sort((a, b) => b.apps - a.apps);
   const heat = (b) => (b > 100 ? "#DCF2E4" : b > 0 ? "#EFF9F2" : b === 0 ? "transparent" : b > -100 ? "#FBEAE5" : "#F6CFC4");
@@ -772,6 +825,12 @@ function PlayersView({ profiles, balances, games, onOpen, isAdmin }) {
     <Card>
       <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Player appearances</div>
       <div style={{ fontSize: 12, color: T.sub, marginBottom: 10 }}>Visible to all members. Tap a player for history{isAdmin ? " and to edit initial data" : ""}.</div>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search players…"
+        style={{ ...inputStyle, width: "100%", marginBottom: 10 }}
+      />
       <div style={{ display: "grid", gridTemplateColumns: "24px 1fr 76px 56px 64px", gap: 6, fontSize: 11.5, fontWeight: 700, color: T.sub, padding: "6px 0", borderBottom: `2px solid ${T.line}` }}>
         <span>#</span><span>Player</span><span style={{ textAlign: "right" }}>Balance</span><span style={{ textAlign: "right" }}>Games</span><span style={{ textAlign: "right" }}>Last 20</span>
       </div>
@@ -790,6 +849,7 @@ function PlayersView({ profiles, balances, games, onOpen, isAdmin }) {
           <span style={{ textAlign: "right", color: T.sub, paddingTop: 2 }}>{u.l20 === null ? "—" : u.l20 + "%"}</span>
         </div>
       ))}
+      {!rows.length && <div style={{ fontSize: 13, color: T.sub, padding: "12px 0", textAlign: "center" }}>No players match "{q}".</div>}
       <div style={{ fontSize: 11, color: T.sub, marginTop: 8 }}>"Last 20" = share of the club's last 20 games the player attended.</div>
     </Card>
   );
@@ -1111,6 +1171,7 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
   const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", ends: "", courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
   const [inv, setInv] = useState({ name: "", phone: "", admin: false, link: "" });
   const [sub, setSub] = useState("games");
+  const memberRowRefs = useRef({});
   const lbl = { fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 4, marginTop: 10 };
   const input = { ...inputStyle, width: "100%" };
   const subTabs = [["games", "Games"], ["members", "Members"], ["lists", "Lists"]];
@@ -1208,17 +1269,18 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
         {inv.link && <div style={{ fontSize: 12, color: T.sub, marginTop: 8, wordBreak: "break-all" }}>Link (copied): <b>{inv.link}</b></div>}
       </Card>
 
-      <Card style={{ marginBottom: 14 }}>
+      <Card style={{ marginBottom: 14, position: "relative" }}>
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 2 }}>Members</div>
         <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Status: Member · Pre-pay (AED 150+ credit, checked at the start of each month) · Ex-player (kept in history, can't join).</div>
         <div style={{ marginBottom: 8 }}>
           <Btn small tone="ghost" onClick={onMonthCheck}>⏱ Run month-start pre-pay check now</Btn>
           <div style={{ fontSize: 11.5, color: T.sub, marginTop: 4 }}>Runs automatically on the 1st of every month: any pre-pay member under AED 150 auto-updates to Member.</div>
         </div>
+        <AlphabetRail profiles={profiles} refs={memberRowRefs} />
         {profiles.map((u) => {
           const isAway = u.away_until && u.away_until >= new Date().toISOString().slice(0, 10);
           return (
-          <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: `1px solid ${T.line}`, gap: 8, flexWrap: "wrap" }}>
+          <div key={u.id} ref={(el) => (memberRowRefs.current[u.id] = el)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: `1px solid ${T.line}`, gap: 8, flexWrap: "wrap" }}>
             <div>
               <span style={{ fontSize: 14, fontWeight: 500, textDecoration: u.revoked ? "line-through" : "none", opacity: u.revoked ? 0.5 : 1 }}>{u.name}</span>
               {u.is_admin && <span style={{ marginLeft: 8 }}><Pill tone="court">Admin</Pill></span>}
