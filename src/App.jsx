@@ -198,7 +198,6 @@ export default function App() {
   const [openPlayer, setOpenPlayer] = useState(null);
   const [toast, setToast] = useState(null);
   const [showAbout, setShowAbout] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
   const reloadTimer = useRef(null);
 
   const notify = (m) => { setToast(String(m)); setTimeout(() => setToast(null), 3800); };
@@ -428,8 +427,8 @@ export default function App() {
 
       <div style={{ maxWidth: 620, margin: "0 auto", padding: 18 }}>
         {tab === "games" && !game && (
-          <GamesList games={games} me={me} isAdmin={isAdmin} onOpen={setOpenGame}
-            onCreate={() => { setTab("admin"); setShowCreate(true); }} />
+          <GamesList games={games} me={me} isAdmin={isAdmin} presets={presets} onOpen={setOpenGame} notify={notify}
+            onCreate={(f) => run(() => rpc("create_game", f), "Game created — announce the link on WhatsApp.")} />
         )}
 
         {tab === "games" && game && (
@@ -491,9 +490,7 @@ export default function App() {
         )}
 
         {tab === "admin" && isAdmin && (
-          <AdminView profiles={profiles} presets={presets} me={me}
-            showCreate={showCreate} setShowCreate={setShowCreate} notify={notify}
-            onCreate={(f) => run(() => rpc("create_game", f), "Game created — announce the link on WhatsApp.").then(() => { setShowCreate(false); setTab("games"); })}
+          <AdminView profiles={profiles} presets={presets} me={me} notify={notify}
             onInvite={async (name, phone, admin) => {
               try {
                 const token = await rpc("create_invite", { p_name: name, p_phone: phone, p_admin: admin });
@@ -559,7 +556,11 @@ function AboutModal({ onClose }) {
 
 /* ---------------- games list ---------------- */
 
-function GamesList({ games, me, isAdmin, onOpen, onCreate }) {
+function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", ends: "", courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
+  const lbl = { fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 4, marginTop: 10 };
+  const input = { ...inputStyle, width: "100%" };
   const open = games.filter((g) => !g.closed);
   const closed = games.filter((g) => g.closed).slice(-5).reverse();
   const CardFor = (g) => {
@@ -603,7 +604,68 @@ function GamesList({ games, me, isAdmin, onOpen, onCreate }) {
       {open.map(CardFor)}
       {!open.length && <Card><div style={{ fontSize: 13, color: T.sub }}>No open games right now. Recurring games open the day after the previous one ends.</div></Card>}
       {closed.length > 0 && <><SectionHead>RECENTLY CLOSED</SectionHead><div style={{ height: 8 }} />{closed.map(CardFor)}</>}
-      {isAdmin && <div style={{ marginTop: 12 }}><Btn tone="gold" onClick={onCreate}>+ Create game</Btn></div>}
+      {isAdmin && (
+        <Card style={{ marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>New game</div>
+            <Btn small tone="gold" onClick={() => setShowCreate(!showCreate)}>{showCreate ? "Close" : "+ Create game"}</Btn>
+          </div>
+          {showCreate && (
+            <div style={{ marginTop: 6 }}>
+              <label style={lbl}>Title</label>
+              <input style={input} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Sunday Doubles" />
+              <label style={lbl}>Location</label>
+              <input style={input} value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="Venue, area" />
+              <label style={lbl}>Google Maps link (optional)</label>
+              <input style={input} value={f.map_link} onChange={(e) => setF({ ...f, map_link: e.target.value })} placeholder="https://maps.google.com/..." />
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}><label style={lbl}>Starts</label><input type="datetime-local" style={input} value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} /></div>
+                <div style={{ flex: 1 }}><label style={lbl}>Ends</label><input type="datetime-local" style={input} value={f.ends} onChange={(e) => setF({ ...f, ends: e.target.value })} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}><label style={lbl}>Courts</label><input type="number" style={input} value={f.courts} onChange={(e) => setF({ ...f, courts: +e.target.value })} /></div>
+                <div style={{ flex: 1 }}><label style={lbl}>Players / court</label><input type="number" style={input} value={f.per_court} onChange={(e) => setF({ ...f, per_court: +e.target.value })} /></div>
+                <div style={{ flex: 1 }}><label style={lbl}>Override cap</label><input type="number" style={input} value={f.cap} onChange={(e) => setF({ ...f, cap: e.target.value })} placeholder={String(f.courts * f.per_court)} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}><label style={lbl}>Cutoff (hrs)</label><input type="number" style={input} value={f.cutoff} onChange={(e) => setF({ ...f, cutoff: +e.target.value })} /></div>
+                <div style={{ flex: 1 }}><label style={lbl}>Cost / player (AED)</label><input type="number" style={input} value={f.cost} onChange={(e) => setF({ ...f, cost: +e.target.value })} /></div>
+                <div style={{ flex: 1 }}><label style={lbl}>Late penalty (AED)</label><input type="number" style={input} value={f.penalty} onChange={(e) => setF({ ...f, penalty: +e.target.value })} /></div>
+              </div>
+              <label style={lbl}>Round robin</label>
+              <div style={{ display: "flex", gap: 14, fontSize: 13, flexWrap: "wrap" }}>
+                {[["manual", "Manual (admin creates when ready)"], ["auto", "Auto (create as soon as roster allows)"]].map(([v, l]) => (
+                  <label key={v} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="radio" checked={f.rr === v} onChange={() => setF({ ...f, rr: v })} /> {l}
+                  </label>
+                ))}
+              </div>
+              <label style={lbl}>Prefill roster from predefined list (auto-confirmed)</label>
+              <select style={input} value={f.preset} onChange={(e) => setF({ ...f, preset: e.target.value })}>
+                <option value="">— none —</option>
+                {presets.map((p) => <option key={p.key} value={p.key}>{p.label} ({(p.members || []).filter((m) => m.active).length} players)</option>)}
+              </select>
+              <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" checked={f.recurring} onChange={(e) => setF({ ...f, recurring: e.target.checked })} />
+                Repeat weekly — next game opens the day after this one ends
+              </label>
+              <div style={{ marginTop: 12 }}>
+                <Btn onClick={() => {
+                  if (!f.title.trim()) return notify("Give the game a title first.");
+                  if (!f.starts || !f.ends) return notify("Set the start and end time.");
+                  onCreate({
+                    p_title: f.title, p_location: f.location, p_map_link: f.map_link,
+                    p_starts: new Date(f.starts).toISOString(), p_ends: new Date(f.ends).toISOString(),
+                    p_courts: f.courts, p_per_court: f.per_court, p_cap: f.cap ? +f.cap : null,
+                    p_cutoff: f.cutoff, p_cost: f.cost, p_penalty: f.penalty,
+                    p_rr: f.rr, p_recurring: f.recurring, p_preset: f.preset,
+                  }).then(() => setShowCreate(false));
+                }}>Create & announce</Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
     </>
   );
 }
@@ -922,6 +984,19 @@ function PlayerDetail({ u, bal, games, isAdmin, isSelf, onBack, onSeed, onOpenin
             <div style={{ fontSize: 11.5, color: T.sub, marginTop: 6 }}>Pre-pay is checked at the start of each month: balance under AED 150 auto-updates status to Member.</div>
           </div>
         )}
+
+        {!isAdmin && isSelf && (
+          <div style={{ marginTop: 18, borderTop: `2px solid ${T.line}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8 }}>YOUR PROFILE</div>
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+              <div><div style={{ fontSize: 11.5, color: T.sub, marginBottom: 3 }}>Date joined</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{fmtDate(u.joined)}</div></div>
+              <div><div style={{ fontSize: 11.5, color: T.sub, marginBottom: 3 }}>Games played</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{apps}</div></div>
+            </div>
+            <div style={{ fontSize: 11.5, color: T.sub, marginTop: 6 }}>Includes games recorded before the app, plus every game you've played since. See something wrong? Ask an admin to correct it.</div>
+          </div>
+        )}
       </Card>
     </>
   );
@@ -1167,14 +1242,11 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
 
 /* ---------------- admin ---------------- */
 
-function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate, onInvite, onRevoke, onStatus, onRegenerate, onPreset, onAwayUntil, onMonthCheck, notify }) {
-  const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", ends: "", courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
+function AdminView({ profiles, presets, me, onInvite, onRevoke, onStatus, onRegenerate, onPreset, onAwayUntil, onMonthCheck, notify }) {
   const [inv, setInv] = useState({ name: "", phone: "", admin: false, link: "" });
-  const [sub, setSub] = useState("games");
+  const [sub, setSub] = useState("members");
   const memberRowRefs = useRef({});
-  const lbl = { fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 4, marginTop: 10 };
-  const input = { ...inputStyle, width: "100%" };
-  const subTabs = [["games", "Games"], ["members", "Members"], ["lists", "Lists"]];
+  const subTabs = [["members", "Members"], ["lists", "Lists"]];
 
   return (
     <>
@@ -1186,69 +1258,6 @@ function AdminView({ profiles, presets, me, showCreate, setShowCreate, onCreate,
           </button>
         ))}
       </div>
-
-      {sub === "games" && (
-      <Card style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>Games</div>
-          <Btn small tone="gold" onClick={() => setShowCreate(!showCreate)}>{showCreate ? "Close" : "+ Create game"}</Btn>
-        </div>
-        {showCreate && (
-          <div style={{ marginTop: 6 }}>
-            <label style={lbl}>Title</label>
-            <input style={input} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Sunday Doubles" />
-            <label style={lbl}>Location</label>
-            <input style={input} value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="Venue, area" />
-            <label style={lbl}>Google Maps link (optional)</label>
-            <input style={input} value={f.map_link} onChange={(e) => setF({ ...f, map_link: e.target.value })} placeholder="https://maps.google.com/..." />
-            <div style={{ display: "flex", gap: 10 }}>
-              <div style={{ flex: 1 }}><label style={lbl}>Starts</label><input type="datetime-local" style={input} value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} /></div>
-              <div style={{ flex: 1 }}><label style={lbl}>Ends</label><input type="datetime-local" style={input} value={f.ends} onChange={(e) => setF({ ...f, ends: e.target.value })} /></div>
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <div style={{ flex: 1 }}><label style={lbl}>Courts</label><input type="number" style={input} value={f.courts} onChange={(e) => setF({ ...f, courts: +e.target.value })} /></div>
-              <div style={{ flex: 1 }}><label style={lbl}>Players / court</label><input type="number" style={input} value={f.per_court} onChange={(e) => setF({ ...f, per_court: +e.target.value })} /></div>
-              <div style={{ flex: 1 }}><label style={lbl}>Override cap</label><input type="number" style={input} value={f.cap} onChange={(e) => setF({ ...f, cap: e.target.value })} placeholder={String(f.courts * f.per_court)} /></div>
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <div style={{ flex: 1 }}><label style={lbl}>Cutoff (hrs)</label><input type="number" style={input} value={f.cutoff} onChange={(e) => setF({ ...f, cutoff: +e.target.value })} /></div>
-              <div style={{ flex: 1 }}><label style={lbl}>Cost / player (AED)</label><input type="number" style={input} value={f.cost} onChange={(e) => setF({ ...f, cost: +e.target.value })} /></div>
-              <div style={{ flex: 1 }}><label style={lbl}>Late penalty (AED)</label><input type="number" style={input} value={f.penalty} onChange={(e) => setF({ ...f, penalty: +e.target.value })} /></div>
-            </div>
-            <label style={lbl}>Round robin</label>
-            <div style={{ display: "flex", gap: 14, fontSize: 13, flexWrap: "wrap" }}>
-              {[["manual", "Manual (admin creates when ready)"], ["auto", "Auto (create as soon as roster allows)"]].map(([v, l]) => (
-                <label key={v} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="radio" checked={f.rr === v} onChange={() => setF({ ...f, rr: v })} /> {l}
-                </label>
-              ))}
-            </div>
-            <label style={lbl}>Prefill roster from predefined list (auto-confirmed)</label>
-            <select style={input} value={f.preset} onChange={(e) => setF({ ...f, preset: e.target.value })}>
-              <option value="">— none —</option>
-              {presets.map((p) => <option key={p.key} value={p.key}>{p.label} ({(p.members || []).filter((m) => m.active).length} players)</option>)}
-            </select>
-            <label style={{ ...lbl, display: "flex", alignItems: "center", gap: 8 }}>
-              <input type="checkbox" checked={f.recurring} onChange={(e) => setF({ ...f, recurring: e.target.checked })} />
-              Repeat weekly — next game opens the day after this one ends
-            </label>
-            <div style={{ marginTop: 12 }}>
-              <Btn onClick={() => {
-                if (!f.title.trim()) return notify("Give the game a title first.");
-                if (!f.starts || !f.ends) return notify("Set the start and end time.");
-                onCreate({
-                  p_title: f.title, p_location: f.location, p_map_link: f.map_link,
-                  p_starts: new Date(f.starts).toISOString(), p_ends: new Date(f.ends).toISOString(),
-                  p_courts: f.courts, p_per_court: f.per_court, p_cap: f.cap ? +f.cap : null,
-                  p_cutoff: f.cutoff, p_cost: f.cost, p_penalty: f.penalty,
-                  p_rr: f.rr, p_recurring: f.recurring, p_preset: f.preset,
-                });
-              }}>Create & announce</Btn>
-            </div>
-          </div>
-        )}
-      </Card>
-      )}
 
       {sub === "members" && (<>
       <Card style={{ marginBottom: 14 }}>
