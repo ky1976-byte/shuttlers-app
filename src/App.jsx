@@ -705,7 +705,10 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
         {r.status === "pending" && (isMine(r) || isAdmin) && (<Btn small onClick={() => onConfirm(r)}>Confirm</Btn>)}
         {r.status === "pending" && (isMine(r) || isAdmin) && !pastStart && (<Btn small tone="red" onClick={() => onDecline(r)}>Decline</Btn>)}
         {(isMine(r) || isAdmin) && r.status !== "pending" && !game.closed && !pastStart && (
-          <Btn small tone="red" onClick={() => onDrop(r)}>{r.status === "in" ? "Drop out" : "Remove"}</Btn>
+          <Btn small tone="red" onClick={() => {
+            if (r.status === "in" && !window.confirm(`Drop out of ${game.title}? If it's within the cutoff window, this may add a late-drop penalty.`)) return;
+            onDrop(r);
+          }}>{r.status === "in" ? "Drop out" : "Remove"}</Btn>
         )}
       </div>
     </div>
