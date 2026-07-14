@@ -558,7 +558,7 @@ function AboutModal({ onClose }) {
 
 function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
   const [showCreate, setShowCreate] = useState(false);
-  const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", ends: "", courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
+  const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", duration: 120, courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
   const lbl = { fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 4, marginTop: 10 };
   const input = { ...inputStyle, width: "100%" };
   const open = games.filter((g) => !g.closed);
@@ -620,8 +620,13 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
               <input style={input} value={f.map_link} onChange={(e) => setF({ ...f, map_link: e.target.value })} placeholder="https://maps.google.com/..." />
               <label style={lbl}>Starts</label>
               <input type="datetime-local" style={input} value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} />
-              <label style={lbl}>Ends</label>
-              <input type="datetime-local" style={input} value={f.ends} onChange={(e) => setF({ ...f, ends: e.target.value })} />
+              <label style={lbl}>Duration (minutes)</label>
+              <input type="number" step={15} style={input} value={f.duration} onChange={(e) => setF({ ...f, duration: +e.target.value })} />
+              {f.starts && f.duration > 0 && (
+                <div style={{ fontSize: 11.5, color: T.sub, marginTop: 4 }}>
+                  Ends {new Date(new Date(f.starts).getTime() + f.duration * 60000).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", timeZone: UAE_TZ })}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 10 }}>
                 <div style={{ flex: 1 }}><label style={lbl}>Courts</label><input type="number" style={input} value={f.courts} onChange={(e) => setF({ ...f, courts: +e.target.value })} /></div>
                 <div style={{ flex: 1 }}><label style={lbl}>Players / court</label><input type="number" style={input} value={f.per_court} onChange={(e) => setF({ ...f, per_court: +e.target.value })} /></div>
@@ -652,10 +657,12 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
               <div style={{ marginTop: 12 }}>
                 <Btn onClick={() => {
                   if (!f.title.trim()) return notify("Give the game a title first.");
-                  if (!f.starts || !f.ends) return notify("Set the start and end time.");
+                  if (!f.starts) return notify("Set the start time.");
+                  if (!f.duration || f.duration <= 0) return notify("Set a duration.");
+                  const endsAt = new Date(new Date(f.starts).getTime() + f.duration * 60000);
                   onCreate({
                     p_title: f.title, p_location: f.location, p_map_link: f.map_link,
-                    p_starts: new Date(f.starts).toISOString(), p_ends: new Date(f.ends).toISOString(),
+                    p_starts: new Date(f.starts).toISOString(), p_ends: endsAt.toISOString(),
                     p_courts: f.courts, p_per_court: f.per_court, p_cap: f.cap ? +f.cap : null,
                     p_cutoff: f.cutoff, p_cost: f.cost, p_penalty: f.penalty,
                     p_rr: f.rr, p_recurring: f.recurring, p_preset: f.preset,
