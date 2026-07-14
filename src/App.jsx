@@ -618,10 +618,16 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
               <input style={input} value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} placeholder="Venue, area" />
               <label style={lbl}>Google Maps link (optional)</label>
               <input style={input} value={f.map_link} onChange={(e) => setF({ ...f, map_link: e.target.value })} placeholder="https://maps.google.com/..." />
-              <label style={lbl}>Starts</label>
-              <input type="datetime-local" style={input} value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} />
-              <label style={lbl}>Duration (minutes)</label>
-              <input type="number" step={15} style={input} value={f.duration} onChange={(e) => setF({ ...f, duration: +e.target.value })} />
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: "1.6 1 0%", minWidth: 0 }}>
+                  <label style={lbl}>Starts</label>
+                  <input type="datetime-local" style={input} value={f.starts} onChange={(e) => setF({ ...f, starts: e.target.value })} />
+                </div>
+                <div style={{ flex: "1 1 0%", minWidth: 0 }}>
+                  <label style={lbl}>Duration (min)</label>
+                  <input type="number" step={15} style={input} value={f.duration} onChange={(e) => setF({ ...f, duration: +e.target.value })} />
+                </div>
+              </div>
               {f.starts && f.duration > 0 && (
                 <div style={{ fontSize: 11.5, color: T.sub, marginTop: 4 }}>
                   Ends {new Date(new Date(f.starts).getTime() + f.duration * 60000).toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", timeZone: UAE_TZ })}
