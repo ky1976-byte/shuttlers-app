@@ -126,7 +126,11 @@ const Screen = ({ children }) => (
 /* ---------------- helpers ---------------- */
 
 const capacityOf = (g) => g.capacity_override ?? g.courts * g.per_court;
-const isPastCutoff = (g) => Date.now() > new Date(g.starts_at).getTime() - g.cutoff_hours * 3600 * 1000;
+// Hardcoded club-wide cutoff: how many hours before a game's start
+// time late-drop penalties kick in, and guests become eligible for
+// waitlist promotion. No longer per-game configurable.
+const DROP_CUTOFF_HOURS = 72;
+const isPastCutoff = (g) => Date.now() > new Date(g.starts_at).getTime() - DROP_CUTOFF_HOURS * 3600 * 1000;
 const isPastStart = (g) => Date.now() > new Date(g.starts_at).getTime();
 // All display times are pinned to UAE time (Asia/Dubai, UTC+4, no DST),
 // regardless of the viewing device's own timezone/location — so a
@@ -558,7 +562,7 @@ function AboutModal({ onClose }) {
 
 function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
   const [showCreate, setShowCreate] = useState(false);
-  const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", duration: 120, courts: 2, per_court: 4, cap: "", cutoff: 4, cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
+  const [f, setF] = useState({ title: "", location: "", map_link: "", starts: "", duration: 120, courts: 2, per_court: 4, cap: "", cost: 40, penalty: 15, rr: "manual", recurring: false, preset: "" });
   const lbl = { fontSize: 12, fontWeight: 600, color: T.sub, display: "block", marginBottom: 4, marginTop: 10 };
   const input = { ...inputStyle, width: "100%" };
   const open = games.filter((g) => !g.closed);
@@ -639,10 +643,10 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
                 <div style={{ flex: 1 }}><label style={lbl}>Override cap</label><input type="number" style={input} value={f.cap} onChange={(e) => setF({ ...f, cap: e.target.value })} placeholder={String(f.courts * f.per_court)} /></div>
               </div>
               <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 1 }}><label style={lbl}>Cutoff (hrs)</label><input type="number" style={input} value={f.cutoff} onChange={(e) => setF({ ...f, cutoff: +e.target.value })} /></div>
                 <div style={{ flex: 1 }}><label style={lbl}>Cost / player (AED)</label><input type="number" style={input} value={f.cost} onChange={(e) => setF({ ...f, cost: +e.target.value })} /></div>
                 <div style={{ flex: 1 }}><label style={lbl}>Late penalty (AED)</label><input type="number" style={input} value={f.penalty} onChange={(e) => setF({ ...f, penalty: +e.target.value })} /></div>
               </div>
+              <div style={{ fontSize: 11.5, color: T.sub, marginTop: 4 }}>Cutoff is fixed club-wide at {DROP_CUTOFF_HOURS}h before start (late-drop penalties + guest promotion).</div>
               <label style={lbl}>Round robin</label>
               <div style={{ display: "flex", gap: 14, fontSize: 13, flexWrap: "wrap" }}>
                 {[["manual", "Manual (admin creates when ready)"], ["auto", "Auto (create as soon as roster allows)"]].map(([v, l]) => (
@@ -670,7 +674,7 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
                     p_title: f.title, p_location: f.location, p_map_link: f.map_link,
                     p_starts: new Date(f.starts).toISOString(), p_ends: endsAt.toISOString(),
                     p_courts: f.courts, p_per_court: f.per_court, p_cap: f.cap ? +f.cap : null,
-                    p_cutoff: f.cutoff, p_cost: f.cost, p_penalty: f.penalty,
+                    p_cutoff: DROP_CUTOFF_HOURS, p_cost: f.cost, p_penalty: f.penalty,
                     p_rr: f.rr, p_recurring: f.recurring, p_preset: f.preset,
                   }).then(() => setShowCreate(false));
                 }}>Create & announce</Btn>
@@ -750,7 +754,7 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
           ) : (
             <>{game.courts} court{game.courts > 1 ? "s" : ""} · capacity {cap}</>
           )}
-          {" "}· cutoff {game.cutoff_hours}h before start
+          {" "}· cutoff {DROP_CUTOFF_HOURS}h before start
           {pastCutoff && !game.closed && <> · <b style={{ color: T.red }}>past cutoff — penalties apply</b></>}
           {" "}· round robin: {game.rr_mode === "auto" ? "auto" : "manual"}
         </div>
