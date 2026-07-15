@@ -1269,8 +1269,9 @@ function ReportsView({ games, expenses, recon, clubBalance, txns, onRecon, onExp
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>Expenses — courts, shuttles & misc</div>
         <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Paid from the club account; feeds the consolidation above.</div>
         {monthExpenses.map((e) => (
-          <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
-            <span>{fmtDate(e.spent_on)} · <b>{e.category}</b> — {e.description}</span><span style={{ color: T.red, fontWeight: 700 }}>−AED {e.amount}</span>
+          <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, fontSize: 13, padding: "8px 0", borderBottom: `1px solid ${T.line}`, flexWrap: "wrap" }}>
+            <span style={{ minWidth: 0, overflowWrap: "anywhere", flex: "1 1 220px" }}>{fmtDate(e.spent_on)} · <b>{e.category}</b> — {e.description}</span>
+            <span style={{ color: T.red, fontWeight: 700, flexShrink: 0 }}>−AED {e.amount}</span>
           </div>
         ))}
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0", fontWeight: 700 }}>
@@ -1278,13 +1279,15 @@ function ReportsView({ games, expenses, recon, clubBalance, txns, onRecon, onExp
         </div>
         <div style={{ marginTop: 10, background: "#EEF3FA", borderRadius: 10, padding: 12 }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Record an expense</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input type="date" value={ex.spent_on} onChange={(e) => setEx({ ...ex, spent_on: e.target.value })} style={{ ...inputStyle, width: 140 }} />
-            <select value={ex.category} onChange={(e) => setEx({ ...ex, category: e.target.value })} style={{ ...inputStyle, width: 130 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input type="date" value={ex.spent_on} onChange={(e) => setEx({ ...ex, spent_on: e.target.value })} style={{ ...inputStyle, flex: "1 1 0%", minWidth: 0 }} />
+            <select value={ex.category} onChange={(e) => setEx({ ...ex, category: e.target.value })} style={{ ...inputStyle, flex: "1 1 0%", minWidth: 0 }}>
               {["Court hire", "Shuttles", "Equipment", "Other"].map((c) => <option key={c}>{c}</option>)}
             </select>
-            <input placeholder="Description" value={ex.description} onChange={(e) => setEx({ ...ex, description: e.target.value })} style={{ ...inputStyle, flex: 1, minWidth: 140 }} />
-            <input type="number" placeholder="AED" value={ex.amount} onChange={(e) => setEx({ ...ex, amount: e.target.value })} style={{ ...inputStyle, width: 80 }} />
+          </div>
+          <input placeholder="Description" value={ex.description} onChange={(e) => setEx({ ...ex, description: e.target.value })} style={{ ...inputStyle, width: "100%", marginTop: 8 }} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <input type="number" placeholder="AED" value={ex.amount} onChange={(e) => setEx({ ...ex, amount: e.target.value })} style={{ ...inputStyle, flex: "1 1 0%", minWidth: 0 }} />
             <Btn small onClick={() => {
               if (!ex.amount || +ex.amount <= 0) return;
               onExpense({ spent_on: ex.spent_on || new Date().toISOString().slice(0, 10), category: ex.category, description: ex.description, amount: +ex.amount });
