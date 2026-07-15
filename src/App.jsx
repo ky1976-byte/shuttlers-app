@@ -484,7 +484,7 @@ export default function App() {
         )}
 
         {tab === "reports" && isAdmin && (
-          <ReportsView games={games} expenses={expenses} recon={recon} clubBalance={clubBalance}
+          <ReportsView games={games} expenses={expenses} recon={recon} clubBalance={clubBalance} txns={txns}
             onRecon={(patch) => run(() => supabase.from("month_recon").upsert({ ...recon, ...patch }).then(({ error }) => { if (error) throw error; }))}
             onExpense={(exp) => run(() => supabase.from("expenses").insert({ ...exp, created_by: me.id }).then(({ error }) => { if (error) throw error; }), "Expense recorded (paid from club account).")} />
         )}
@@ -1142,16 +1142,23 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
 
 /* ---------------- reports ---------------- */
 
-function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }) {
+function ReportsView({ games, expenses, recon, clubBalance, txns, onRecon, onExpense }) {
   const [ex, setEx] = useState({ spent_on: "", category: "Court hire", description: "", amount: "" });
   const monthStart = new Date(recon.month);
   const inMonth = (d) => { const x = new Date(d); return x.getFullYear() === monthStart.getFullYear() && x.getMonth() === monthStart.getMonth(); };
   const closed = games.filter((g) => g.closed && inMonth(g.starts_at)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
   const monthExpenses = expenses.filter((e) => inMonth(e.spent_on));
+  // Billed amounts (accrual) -- what members were charged, informational
+  // only. Not the same as cash actually received; kept separate from
+  // the closing-balance formula below so it can't be double-counted or
+  // mistaken for real cash, matching the same cash-basis model used by
+  // club_balance (Ledger tab): a payment only counts once it's actually
+  // recorded as received, not the moment a game bills someone.
   const collections = closed.reduce((s, g) => s + (+g.collected || 0), 0);
   const pens = closed.reduce((s, g) => s + (+g.penalty_collected || 0), 0);
   const spent = monthExpenses.reduce((s, e) => s + +e.amount, 0);
-  const calcClose = +recon.opening + collections + pens - spent;
+  const paymentsReceived = (txns || []).filter((t) => t.kind === "payment" && inMonth(t.created_at)).reduce((s, t) => s + +t.amount, 0);
+  const calcClose = +recon.opening + paymentsReceived - spent;
   const variance = recon.actual_closing == null ? null : +recon.actual_closing - calcClose;
   const cell = { padding: "7px 4px", fontSize: 12, borderBottom: `1px solid ${T.line}` };
   const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: UAE_TZ });
@@ -1169,15 +1176,15 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
         Planned: capacityOf(g),
         Actual: g.actual_players,
         "Per player (AED)": g.cost_per_player,
-        "Collected from game (AED)": g.collected,
-        "Collected from penalty (AED)": +g.penalty_collected || 0,
-        "Total (AED)": (+g.collected || 0) + (+g.penalty_collected || 0),
+        "Billed for game (AED)": g.collected,
+        "Billed for penalty (AED)": +g.penalty_collected || 0,
+        "Total billed (AED)": (+g.collected || 0) + (+g.penalty_collected || 0),
       };
     });
     summaryRows.push({});
     summaryRows.push({ Date: "Opening balance", "Total (AED)": +recon.opening });
-    summaryRows.push({ Date: "Game collections", "Total (AED)": collections });
-    summaryRows.push({ Date: "Penalties collected", "Total (AED)": pens });
+    summaryRows.push({ Date: "Total billed to members (accrual, informational)", "Total (AED)": collections + pens });
+    summaryRows.push({ Date: "Payments actually received", "Total (AED)": paymentsReceived });
     summaryRows.push({ Date: "Expenses", "Total (AED)": -spent });
     summaryRows.push({ Date: "Calculated closing balance", "Total (AED)": calcClose });
     if (recon.actual_closing != null) {
@@ -1237,11 +1244,14 @@ function ReportsView({ games, expenses, recon, clubBalance, onRecon, onExpense }
         </div>
 
         <div style={{ marginTop: 14, background: "#EEF3FA", borderRadius: 10, padding: 12, fontSize: 13 }}>
-          {[["Opening balance", +recon.opening], ["+ Game collections", collections], ["+ Penalties collected", pens], ["− Expenses", spent]].map(([l, v]) => (
+          {[["Opening balance", +recon.opening], ["+ Payments received", paymentsReceived], ["− Expenses", spent]].map(([l, v]) => (
             <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span>{l}</span><b>AED {v}</b></div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0 3px", borderTop: `1px solid ${T.line}`, fontWeight: 700 }}>
             <span>Calculated closing balance</span><span>AED {calcClose}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 0", fontSize: 11.5, color: T.sub, borderTop: `1px dashed ${T.line}`, marginTop: 6 }}>
+            <span>Billed to members this month (accrual — not cash, informational only)</span><span>AED {collections + pens}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0 0", gap: 8 }}>
             <span>Actual closing (manual reconciliation)</span>
