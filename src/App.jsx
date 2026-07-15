@@ -479,7 +479,7 @@ export default function App() {
         {tab === "ledger" && (
           <LedgerView me={me} isAdmin={isAdmin} profiles={profiles} balances={balances} txns={txns}
             clubBalance={clubBalance} nameOf={nameOf}
-            onPay={(id, amt) => run(() => rpc("record_payment", { p_user: id, p_amount: amt }), `AED ${amt} received into club account.`)}
+            onPay={(id, amt, mode, date, remark) => run(() => rpc("record_payment", { p_user: id, p_amount: amt, p_mode: mode, p_date: date, p_remark: remark }), `AED ${amt} received into club account.`)}
             onTransfer={(f, t, amt) => run(() => rpc("transfer_balance", { p_from: f, p_to: t, p_amount: amt }), "Transfer recorded.")} />
         )}
 
@@ -1023,6 +1023,8 @@ function PlayerDetail({ u, bal, games, isAdmin, isSelf, onBack, onSeed, onOpenin
 function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf, onPay, onTransfer }) {
   const [amounts, setAmounts] = useState({});
   const [ledgerQ, setLedgerQ] = useState("");
+  const [detailFor, setDetailFor] = useState(null);
+  const [detail, setDetail] = useState({ mode: "Cash", date: new Date().toISOString().slice(0, 10), remark: "" });
   const active = profiles.filter((u) => !u.revoked && u.status !== "explayer");
   const ledgerRows = active.filter((u) => u.name.toLowerCase().includes(ledgerQ.trim().toLowerCase()));
   const [tf, setTf] = useState({ from: "", to: "", amt: "" });
@@ -1082,14 +1084,34 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
             />
             {ledgerRows.map((u) => {
               const b = balances.find((x) => x.user_id === u.id)?.balance ?? 0;
+              const expanded = detailFor === u.id;
               return (
                 <div key={u.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "9px 0", borderBottom: `1px solid ${T.line}` }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{u.name}{u.is_admin ? " ⭐" : ""}</span>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
                     <span style={{ fontWeight: 700, color: b < 0 ? T.red : b > 0 ? T.green : T.ink, fontSize: 14, minWidth: 70 }}>AED {b}</span>
                     <input type="number" placeholder="AED" value={amounts[u.id] || ""} onChange={(ev) => setAmounts({ ...amounts, [u.id]: ev.target.value })} style={{ ...inputStyle, width: 70, padding: "6px 8px" }} />
-                    <Btn small tone="ghost" onClick={() => { onPay(u.id, +amounts[u.id]); setAmounts({ ...amounts, [u.id]: "" }); }}>Record</Btn>
+                    <Btn small tone="ghost" onClick={() => {
+                      if (expanded) { setDetailFor(null); return; }
+                      if (!amounts[u.id]) return;
+                      setDetail({ mode: "Cash", date: new Date().toISOString().slice(0, 10), remark: "" });
+                      setDetailFor(u.id);
+                    }}>{expanded ? "Close" : "Record"}</Btn>
                   </div>
+                  {expanded && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", background: "#F8FAFD", padding: 8, borderRadius: 8 }}>
+                      <select value={detail.mode} onChange={(e) => setDetail({ ...detail, mode: e.target.value })} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12 }}>
+                        <option>Cash</option><option>Bank transfer</option><option>Other</option>
+                      </select>
+                      <input type="date" value={detail.date} onChange={(e) => setDetail({ ...detail, date: e.target.value })} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12, width: 132 }} />
+                      <input placeholder="Remark (optional)" value={detail.remark} onChange={(e) => setDetail({ ...detail, remark: e.target.value })} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12, flex: 1, minWidth: 110 }} />
+                      <Btn small onClick={() => {
+                        onPay(u.id, +amounts[u.id], detail.mode, detail.date, detail.remark);
+                        setAmounts({ ...amounts, [u.id]: "" });
+                        setDetailFor(null);
+                      }}>Confirm AED {amounts[u.id]}</Btn>
+                    </div>
+                  )}
                 </div>
               );
             })}
