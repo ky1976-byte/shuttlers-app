@@ -863,6 +863,26 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
           </div>
         )}
 
+        {game.roster.filter((r) => r.status === "dropped").length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <SectionHead color={T.sub}>DROPPED OUT</SectionHead>
+            {game.roster.filter((r) => r.status === "dropped")
+              .sort((a, b) => new Date(b.dropped_at) - new Date(a.dropped_at))
+              .map((r) => {
+                const penalized = penalties.some((p) => p.user_id === r.user_id);
+                return (
+                  <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+                    <span style={{ fontSize: 13.5 }}>
+                      {r.kind === "guest" ? r.guest_name : nameOf(r.user_id)}
+                      {r.dropped_at && <span style={{ color: T.sub }}> — {new Date(r.dropped_at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: UAE_TZ })}</span>}
+                    </span>
+                    {!penalized && <Pill tone="ink">no penalty</Pill>}
+                  </div>
+                );
+              })}
+          </div>
+        )}
+
         {isAdmin && !game.closed && (
           <div style={{ marginTop: 18, borderTop: `2px solid ${T.line}`, paddingTop: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8 }}>ADMIN CONTROLS</div>
@@ -1105,7 +1125,7 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
                   {expanded && (
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", background: "#F8FAFD", padding: 8, borderRadius: 8 }}>
                       <select value={detail.mode} onChange={(e) => setDetail({ ...detail, mode: e.target.value })} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12 }}>
-                        <option>Cash</option><option>Bank transfer</option><option>Other</option>
+                        <option>Cash</option><option>Bank transfer</option><option>Careem Pay</option>
                       </select>
                       <input type="date" value={detail.date} onChange={(e) => setDetail({ ...detail, date: e.target.value })} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12, width: 132 }} />
                       <input placeholder="Remark (optional)" value={detail.remark} onChange={(e) => setDetail({ ...detail, remark: e.target.value })} style={{ ...inputStyle, padding: "5px 6px", fontSize: 12, flex: 1, minWidth: 110 }} />
