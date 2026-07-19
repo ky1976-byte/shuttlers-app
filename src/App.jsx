@@ -31,7 +31,7 @@ const Card = ({ children, onClick, style }) => (
   <div onClick={onClick} style={{ background: T.card, border: `1px solid ${T.line}`, boxShadow: "0 1px 2px rgba(16,28,46,0.05)", borderRadius: 14, padding: 16, cursor: onClick ? "pointer" : "default", ...style }}>{children}</div>
 );
 
-const Btn = ({ children, tone = "court", onClick, small, disabled }) => {
+const Btn = ({ children, tone = "court", onClick, small, disabled, style }) => {
   const styles = {
     court: { background: T.court, color: "#fff", border: "none" },
     ghost: { background: "transparent", color: T.court, border: `1.5px solid ${T.court}` },
@@ -40,7 +40,7 @@ const Btn = ({ children, tone = "court", onClick, small, disabled }) => {
   };
   return (
     <button onClick={onClick} disabled={disabled}
-      style={{ ...styles[tone], opacity: disabled ? 0.4 : 1, fontFamily: font.body, fontWeight: 600, fontSize: small ? 12.5 : 14, padding: small ? "7px 12px" : "11px 18px", borderRadius: 10, cursor: disabled ? "default" : "pointer" }}>
+      style={{ ...styles[tone], opacity: disabled ? 0.4 : 1, fontFamily: font.body, fontWeight: 600, fontSize: small ? 12.5 : 14, padding: small ? "7px 12px" : "11px 18px", borderRadius: 10, cursor: disabled ? "default" : "pointer", ...style }}>
       {children}
     </button>
   );
@@ -719,10 +719,10 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
         {r.status === "pending" && <Pill tone="gold">Confirm by {new Date(r.pending_until).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: UAE_TZ })}</Pill>}
       </div>
       <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-        {r.status === "pending" && (isMine(r) || isAdmin) && (<Btn small onClick={() => onConfirm(r)}>Confirm</Btn>)}
-        {r.status === "pending" && (isMine(r) || isAdmin) && !pastStart && (<Btn small tone="red" onClick={() => onDecline(r)}>Decline</Btn>)}
+        {r.status === "pending" && (isMine(r) || isAdmin) && (<Btn small style={{ padding: "6px 9px" }} onClick={() => onConfirm(r)}>Confirm</Btn>)}
+        {r.status === "pending" && (isMine(r) || isAdmin) && !pastStart && (<Btn small tone="red" style={{ padding: "6px 9px" }} onClick={() => onDecline(r)}>Decline</Btn>)}
         {(isMine(r) || isAdmin) && r.status !== "pending" && !game.closed && !pastStart && (
-          <Btn small tone="red" onClick={() => {
+          <Btn small tone="red" style={{ padding: "6px 9px" }} onClick={() => {
             if (r.status === "in" && !window.confirm(`Drop out of ${game.title}? If it's within the cutoff window, this may add a late-drop penalty.`)) return;
             onDrop(r);
           }}>{r.status === "in" ? "Drop out" : "Remove"}</Btn>
