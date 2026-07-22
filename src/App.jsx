@@ -571,7 +571,7 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
     const cap = capacityOf(g);
     const inN = g.roster.filter((r) => r.status === "in").length;
     const waitN = g.roster.filter((r) => r.status === "wait").length;
-    const mine = g.roster.find((r) => r.kind === "member" && r.user_id === me.id);
+    const mine = g.roster.find((r) => r.kind === "member" && r.user_id === me.id && r.status !== "dropped");
     return (
       <Card key={g.id} onClick={() => onOpen(g.id)} style={{ marginBottom: 14, opacity: g.closed ? 0.75 : 1 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
@@ -694,10 +694,12 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
   const [resize, setResize] = useState({ courts: game.courts, perCourt: game.per_court, cap: game.capacity_override ?? "" });
   const cap = capacityOf(game);
   const byTime = (a, b) => new Date(a.joined_at) - new Date(b.joined_at);
-  const playing = game.roster.filter((r) => r.status === "in").sort(byTime);
+  const playing = game.roster
+  .filter((r) => r.status === "in")
+  .sort((a, b) => (a.kind === "guest") - (b.kind === "guest") || byTime(a, b));
   const pending = game.roster.filter((r) => r.status === "pending");
   const waits = orderedWaitlist(game.roster);
-  const mine = game.roster.find((r) => r.kind === "member" && r.user_id === me.id);
+  const mine = game.roster.find((r) => r.kind === "member" && r.user_id === me.id && r.status !== "dropped");
   const label = (r) => (r.kind === "guest" ? `${r.guest_name} (${nameOf(r.user_id)})` : nameOf(r.user_id));
   const isMine = (r) => r.user_id === me.id;
   const pastCutoff = isPastCutoff(game);
