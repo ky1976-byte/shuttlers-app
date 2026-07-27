@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase, configured, rpc } from "./lib/supabase.js";
+import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 /* ------------------------------------------------------------------ */
 /*  SHUTTLERS BC — production app (Supabase + PWA)                     */
@@ -457,6 +460,7 @@ export default function App() {
             onPenaltyAmt={(v) => run(() => supabase.from("games").update({ penalty: v }).eq("id", game.id).then(({ error }) => { if (error) throw error; }))}
             onResize={(courts, perCourt, cap) => run(() => rpc("update_game_config", { p_game: game.id, p_courts: courts, p_per_court: perCourt, p_cap: cap }), "Game size updated — overflow moved to waitlist / new spots offered from waitlist.")}
             onResolvePenalty={(pid, a) => run(() => rpc("resolve_penalty", { p_penalty: pid, p_action: a }), a === "applied" ? "Penalty charged." : "Penalty waived.")}
+            onPenaltyEdit={(pid, amt) => run(() => rpc("update_penalty_amount", { p_penalty: pid, p_amount: amt }), "Penalty amount updated.")}
             onTournament={() => run(async () => {
               const names = game.roster.filter((r) => r.status === "in")
                 .map((r) => (r.kind === "guest" ? `${r.guest_name} (${nameOf(r.user_id)})` : nameOf(r.user_id)));
@@ -689,7 +693,7 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
 
 /* ---------------- game detail ---------------- */
 
-function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, onBack, onJoin, onGuest, onDrop, onConfirm, onDecline, onClose, onCancel, onCost, onPenaltyAmt, onResize, onResolvePenalty, onTournament, onWinner }) {
+function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, onBack, onJoin, onGuest, onDrop, onConfirm, onDecline, onClose, onCancel, onCost, onPenaltyAmt, onResize, onResolvePenalty, onPenaltyEdit, onTournament, onWinner }) {
   const [guestName, setGuestName] = useState("");
   const [resize, setResize] = useState({ courts: game.courts, perCourt: game.per_court, cap: game.capacity_override ?? "" });
   const cap = capacityOf(game);
@@ -849,9 +853,19 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
           <div style={{ marginTop: 18 }}>
             <SectionHead color={T.red}>LATE-DROP PENALTIES</SectionHead>
             {penalties.map((p) => (
-              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
-                <span style={{ fontSize: 13.5 }}>
-                  {nameOf(p.user_id)} — AED {p.amount}{" "}
+              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", rowGap: 6 }}>
+                <span style={{ fontSize: 13.5, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  {nameOf(p.user_id)} —{" "}
+                  {isAdmin && p.status === "pending" ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      AED <input type="number" min={0} defaultValue={p.amount}
+                        onBlur={(e) => +e.target.value !== +p.amount && +e.target.value >= 0 && onPenaltyEdit(p.id, +e.target.value)}
+                        style={{ ...inputStyle, width: 56, padding: "3px 6px", fontWeight: 700 }}
+                        aria-label={`Edit penalty amount for ${nameOf(p.user_id)}`} />
+                    </span>
+                  ) : (
+                    <>AED {p.amount}</>
+                  )}
                   {p.status !== "pending" && <Pill tone={p.status === "waived" ? "court" : "red"}>{p.status}</Pill>}
                 </span>
                 {isAdmin && p.status === "pending" && (
@@ -962,8 +976,6 @@ function PlayersView({ profiles, balances, games, onOpen, isAdmin }) {
 function PlayerDetail({ u, bal, games, isAdmin, isSelf, onBack, onSeed, onOpeningBalance, onAwayUntil }) {
   const [seedAmt, setSeedAmt] = useState("");
   const [awayDate, setAwayDate] = useState(u.away_until || "");
-  const recent = games.filter((g) => g.closed && g.roster.some((r) => r.kind === "member" && r.user_id === u.id && r.status === "in"))
-    .sort((a, b) => new Date(b.starts_at) - new Date(a.starts_at)).slice(0, 12);
   const apps = appearancesOf(u, games);
   const l20 = last20Pct(u, games);
   const prepayShort = u.status === "prepay" && bal < 150;
@@ -989,13 +1001,15 @@ function PlayerDetail({ u, bal, games, isAdmin, isSelf, onBack, onSeed, onOpenin
           ))}
         </div>
 
-        <SectionHead>RECENT GAMES</SectionHead>
-        {recent.map((g) => (
-          <div key={g.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
-            <span>{fmtDT(g).split("·")[0]} · {g.title}</span><span style={{ color: T.red, fontWeight: 600 }}>−AED {g.cost_per_player}</span>
-          </div>
-        ))}
-        {!recent.length && <div style={{ fontSize: 13, color: T.sub, padding: "8px 0" }}>No closed games in the app yet.</div>}
+        {(isAdmin || isSelf) ? (
+          <>
+            <SectionHead>TRANSACTIONS</SectionHead>
+            <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 4 }}>Every game fee, penalty, payment and transfer on this account.</div>
+            <TransactionFeed userId={u.id} />
+          </>
+        ) : (
+          <div style={{ fontSize: 12, color: T.sub, marginTop: 16 }}>Transaction history is only visible to {u.name} and admins.</div>
+        )}
 
         {(isAdmin || isSelf) && (
           <div style={{ marginTop: 18, borderTop: `2px solid ${T.line}`, paddingTop: 14 }}>
@@ -1044,6 +1058,54 @@ function PlayerDetail({ u, bal, games, isAdmin, isSelf, onBack, onSeed, onOpenin
   );
 }
 
+/* Unlimited transaction history for a single user, loaded 20 at a time.
+   Fetched directly (not from the global capped txns list) so history
+   never silently truncates as the club account grows past 500 rows. */
+function TransactionFeed({ userId, pageSize = 20 }) {
+  const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loading, setLoading] = useState(true);
+
+  const loadPage = async (p, replace) => {
+    setLoading(true);
+    const from = p * pageSize, to = from + pageSize - 1;
+    const { data, error } = await supabase.from("transactions").select("*")
+      .eq("user_id", userId).order("created_at", { ascending: false }).range(from, to);
+    if (!error) {
+      setRows((prev) => (replace ? (data || []) : [...prev, ...(data || [])]));
+      setHasMore((data || []).length === pageSize);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    setRows([]); setPage(0); setHasMore(true);
+    loadPage(0, true);
+    /* eslint-disable-next-line */
+  }, [userId]);
+
+  return (
+    <>
+      {rows.map((t) => (
+        <div key={t.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+          <span><span style={{ color: T.sub, fontSize: 12 }}>{fmtDate(t.created_at)}</span> · {t.description}</span>
+          <span style={{ fontWeight: 700, whiteSpace: "nowrap", color: t.amount < 0 ? T.red : T.green }}>
+            {t.amount < 0 ? "−" : "+"}AED {Math.abs(t.amount)}
+          </span>
+        </div>
+      ))}
+      {!rows.length && !loading && <div style={{ fontSize: 13, color: T.sub, padding: "8px 0" }}>No transactions yet.</div>}
+      {loading && <div style={{ fontSize: 12, color: T.sub, padding: "8px 0" }}>Loading…</div>}
+      {hasMore && !loading && rows.length > 0 && (
+        <div style={{ textAlign: "center", marginTop: 8 }}>
+          <Btn small tone="ghost" onClick={() => { const next = page + 1; setPage(next); loadPage(next, false); }}>Load more</Btn>
+        </div>
+      )}
+    </>
+  );
+}
+
 /* ---------------- ledger ---------------- */
 
 function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf, onPay, onTransfer }) {
@@ -1056,8 +1118,6 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
   const [tf, setTf] = useState({ from: "", to: "", amt: "" });
   const myBal = balances.find((b) => b.user_id === me.id)?.balance ?? 0;
   const receivable = balances.reduce((s, b) => s + (b.balance < 0 ? -b.balance : 0), 0);
-  const sixMonthsAgo = new Date(); sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-  const myTxns = txns.filter((t) => t.user_id === me.id && new Date(t.created_at) >= sixMonthsAgo);
 
   return (
     <>
@@ -1070,17 +1130,9 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
       </Card>
 
       <Card style={{ marginBottom: 14 }}>
-        <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>My transactions — last 6 months</div>
+        <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>My transactions</div>
         <div style={{ fontSize: 12, color: T.sub, marginBottom: 6 }}>Every game fee, penalty, payment and transfer on your account.</div>
-        {myTxns.map((t) => (
-          <div key={t.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
-            <span><span style={{ color: T.sub, fontSize: 12 }}>{fmtDate(t.created_at)}</span> · {t.description}</span>
-            <span style={{ fontWeight: 700, whiteSpace: "nowrap", color: t.amount < 0 ? T.red : T.green }}>
-              {t.amount < 0 ? "−" : "+"}AED {Math.abs(t.amount)}
-            </span>
-          </div>
-        ))}
-        {!myTxns.length && <div style={{ fontSize: 13, color: T.sub, padding: "8px 0" }}>No transactions yet.</div>}
+        <TransactionFeed userId={me.id} />
       </Card>
 
       {isAdmin && (
@@ -1447,6 +1499,40 @@ const DOW_MAP = {
   sat: 6, saturday: 6,
 };
 
+/* One row in the drag-to-reorder "on this list" table. Long-press
+   (dnd-kit's default touch activation delay) lifts the row; dragging
+   reorders live. Up/down buttons are a non-drag fallback for keyboard
+   and assistive-tech users, and anyone who prefers precise moves. */
+function SortableListRow({ entry, i, count, gridCols, cell, nameCell, iconBtn, onMoveUp, onMoveDown, onToggleActive }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id });
+  const style = {
+    transform: CSS.Transform.toString(transform), transition,
+    opacity: isDragging ? 0.5 : 1,
+    display: "grid", gridTemplateColumns: gridCols, gap: 4, alignItems: "center",
+    gridColumn: "1 / -1", background: isDragging ? "#F8FAFD" : "transparent",
+  };
+  return (
+    <div ref={setNodeRef} style={style}>
+      <span {...attributes} {...listeners}
+        style={{ ...cell, cursor: "grab", color: T.sub, fontSize: 15, textAlign: "center", touchAction: "none" }}
+        aria-label={`Drag to reorder ${entry.row.name}`}>⠿</span>
+      {nameCell(entry.row, !entry.active)}
+      <span style={{ ...cell, textAlign: "right" }}>{entry.row.total_games}</span>
+      <span style={{ ...cell, textAlign: "right" }}>{entry.row.last20_pct}%</span>
+      <span style={{ ...cell, textAlign: "right", display: "flex", gap: 2, justifyContent: "flex-end" }}>
+        <button onClick={() => onMoveUp(entry.id)} disabled={i === 0} style={{ ...iconBtn(T.sub), opacity: i === 0 ? 0.3 : 1, width: 20, height: 20, fontSize: 10 }} aria-label={`Move ${entry.row.name} up`}>▲</button>
+        <button onClick={() => onMoveDown(entry.id)} disabled={i === count - 1} style={{ ...iconBtn(T.sub), opacity: i === count - 1 ? 0.3 : 1, width: 20, height: 20, fontSize: 10 }} aria-label={`Move ${entry.row.name} down`}>▼</button>
+      </span>
+      <span style={{ ...cell, textAlign: "right" }}>
+        <button onClick={() => onToggleActive(entry.id)} style={iconBtn(entry.active ? T.red : T.green)}
+          aria-label={entry.active ? `Pause ${entry.row.name}` : `Re-add ${entry.row.name}`}>
+          {entry.active ? "✕" : "✓"}
+        </button>
+      </span>
+    </div>
+  );
+}
+
 function PresetRankedList({ preset, profiles, onToggle, notify }) {
   const [rows, setRows] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1489,7 +1575,22 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
     current.splice(Math.max(0, Math.min(newIndex, current.length)), 0, item);
     saveMembers(current.map((m, i) => ({ id: m.id, active: m.active, order: i + 1 })));
   };
+  const moveUp = (id) => { const i = membersSorted.findIndex((m) => m.id === id); if (i > 0) reorder(i - 1, id); };
+  const moveDown = (id) => { const i = membersSorted.findIndex((m) => m.id === id); if (i < membersSorted.length - 1) reorder(i + 1, id); };
   const toggleActive = (id) => saveMembers(membersSorted.map((m) => (m.id === id ? { ...m, active: !m.active } : m)));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } })
+  );
+  const onDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    const current = [...membersSorted];
+    const oldIndex = current.findIndex((m) => m.id === active.id);
+    const newIndex = current.findIndex((m) => m.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const next = arrayMove(current, oldIndex, newIndex);
+    saveMembers(next.map((m, i) => ({ id: m.id, active: m.active, order: i + 1 })));
+  };
   const addMember = (id) => {
     const maxOrder = membersSorted.reduce((mx, m) => Math.max(mx, m.order), 0);
     saveMembers([...membersSorted, { id, active: true, order: maxOrder + 1 }]);
@@ -1509,7 +1610,7 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
     </span>
   );
 
-  const onListCols = "20px minmax(0,1fr) 76px 30px";
+  const onListCols = "24px minmax(0,1fr) 44px 44px 46px 30px";
   const suggestedCols = "20px minmax(0,1fr) 46px 46px 40px 32px";
 
   return (
@@ -1530,30 +1631,22 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
           {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading…</div>}
 
           <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 2 }}>On this list</div>
-          <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>Pick a number to move someone to that position. ✕ pauses without removing them — they stay right here, ready to re-add with ✓. When a game has fewer spots than active people here, the lowest-priority names waitlist automatically.</div>
+          <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>Drag ⠿ to reorder, or use the arrows. ✕ pauses without removing them — they stay right here, ready to re-add with ✓. When a game has fewer spots than active people here, the lowest-priority names waitlist automatically.</div>
           {onListEntries.length ? (
             <div style={{ display: "grid", gridTemplateColumns: onListCols, gap: 4 }}>
-              <span style={head}></span><span style={head}>Player</span><span style={{ ...head, textAlign: "right" }}>Order</span><span style={head}></span>
-              {onListEntries.map((entry, i) => (
-                <React.Fragment key={entry.id}>
-                  <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
-                  {nameCell(entry.row, !entry.active)}
-                  <span style={{ ...cell, textAlign: "right" }}>
-                    <select value={i + 1}
-                      onChange={(e) => reorder(+e.target.value - 1, entry.id)}
-                      style={{ ...inputStyle, padding: "4px 6px", fontSize: 12, width: 52 }}
-                      aria-label={`Reorder ${entry.row.name}`}>
-                      {onListEntries.map((_, n) => <option key={n + 1} value={n + 1}>{n + 1}</option>)}
-                    </select>
-                  </span>
-                  <span style={{ ...cell, textAlign: "right" }}>
-                    <button onClick={() => toggleActive(entry.id)} style={iconBtn(entry.active ? T.red : T.green)}
-                      aria-label={entry.active ? `Pause ${entry.row.name}` : `Re-add ${entry.row.name}`}>
-                      {entry.active ? "✕" : "✓"}
-                    </button>
-                  </span>
-                </React.Fragment>
-              ))}
+              <span style={head}></span><span style={head}>Player</span>
+              <span style={{ ...head, textAlign: "right" }}>Games</span>
+              <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span>
+              <span style={head}></span><span style={head}></span>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+                <SortableContext items={onListEntries.map((e) => e.id)} strategy={verticalListSortingStrategy}>
+                  {onListEntries.map((entry, i) => (
+                    <SortableListRow key={entry.id} entry={entry} i={i} count={onListEntries.length}
+                      gridCols={onListCols} cell={cell} nameCell={nameCell} iconBtn={iconBtn}
+                      onMoveUp={moveUp} onMoveDown={moveDown} onToggleActive={toggleActive} />
+                  ))}
+                </SortableContext>
+              </DndContext>
             </div>
           ) : <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>No one added yet.</div>}
           {onListMissing > 0 && (
