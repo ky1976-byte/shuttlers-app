@@ -1501,9 +1501,9 @@ const DOW_MAP = {
 
 /* One row in the drag-to-reorder "on this list" table. Long-press
    (dnd-kit's default touch activation delay) lifts the row; dragging
-   reorders live. Up/down buttons are a non-drag fallback for keyboard
-   and assistive-tech users, and anyone who prefers precise moves. */
-function SortableListRow({ entry, i, count, gridCols, cell, nameCell, iconBtn, onMoveUp, onMoveDown, onToggleActive }) {
+   reorders live. Columns: drag handle · S.No. · player · games ·
+   L20 · score · pause/re-add. */
+function SortableListRow({ entry, i, gridCols, cell, nameCell, iconBtn, onToggleActive }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id });
   const style = {
     transform: CSS.Transform.toString(transform), transition,
@@ -1516,13 +1516,11 @@ function SortableListRow({ entry, i, count, gridCols, cell, nameCell, iconBtn, o
       <span {...attributes} {...listeners}
         style={{ ...cell, cursor: "grab", color: T.sub, fontSize: 15, textAlign: "center", touchAction: "none" }}
         aria-label={`Drag to reorder ${entry.row.name}`}>⠿</span>
+      <span style={{ ...cell, color: T.sub, fontSize: 11 }}>{i + 1}</span>
       {nameCell(entry.row, !entry.active)}
       <span style={{ ...cell, textAlign: "right" }}>{entry.row.total_games}</span>
       <span style={{ ...cell, textAlign: "right" }}>{entry.row.last20_pct}%</span>
-      <span style={{ ...cell, textAlign: "right", display: "flex", gap: 2, justifyContent: "flex-end" }}>
-        <button onClick={() => onMoveUp(entry.id)} disabled={i === 0} style={{ ...iconBtn(T.sub), opacity: i === 0 ? 0.3 : 1, width: 20, height: 20, fontSize: 10 }} aria-label={`Move ${entry.row.name} up`}>▲</button>
-        <button onClick={() => onMoveDown(entry.id)} disabled={i === count - 1} style={{ ...iconBtn(T.sub), opacity: i === count - 1 ? 0.3 : 1, width: 20, height: 20, fontSize: 10 }} aria-label={`Move ${entry.row.name} down`}>▼</button>
-      </span>
+      <span style={{ ...cell, textAlign: "right", fontWeight: 700 }}>{entry.row.score}</span>
       <span style={{ ...cell, textAlign: "right" }}>
         <button onClick={() => onToggleActive(entry.id)} style={iconBtn(entry.active ? T.red : T.green)}
           aria-label={entry.active ? `Pause ${entry.row.name}` : `Re-add ${entry.row.name}`}>
@@ -1575,8 +1573,6 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
     current.splice(Math.max(0, Math.min(newIndex, current.length)), 0, item);
     saveMembers(current.map((m, i) => ({ id: m.id, active: m.active, order: i + 1 })));
   };
-  const moveUp = (id) => { const i = membersSorted.findIndex((m) => m.id === id); if (i > 0) reorder(i - 1, id); };
-  const moveDown = (id) => { const i = membersSorted.findIndex((m) => m.id === id); if (i < membersSorted.length - 1) reorder(i + 1, id); };
   const toggleActive = (id) => saveMembers(membersSorted.map((m) => (m.id === id ? { ...m, active: !m.active } : m)));
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
@@ -1610,7 +1606,7 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
     </span>
   );
 
-  const onListCols = "24px minmax(0,1fr) 44px 44px 46px 30px";
+  const onListCols = "20px 18px minmax(0,1fr) 40px 40px 44px 30px";
   const suggestedCols = "20px minmax(0,1fr) 46px 46px 40px 32px";
 
   return (
@@ -1631,19 +1627,20 @@ function PresetRankedList({ preset, profiles, onToggle, notify }) {
           {dow !== undefined && loading && <div style={{ fontSize: 12, color: T.sub }}>Loading…</div>}
 
           <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginBottom: 2 }}>On this list</div>
-          <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>Drag ⠿ to reorder, or use the arrows. ✕ pauses without removing them — they stay right here, ready to re-add with ✓. When a game has fewer spots than active people here, the lowest-priority names waitlist automatically.</div>
+          <div style={{ fontSize: 11, color: T.sub, marginBottom: 6 }}>Drag ⠿ to reorder. ✕ pauses without removing them — they stay right here, ready to re-add with ✓. When a game has fewer spots than active people here, the lowest-priority names waitlist automatically.</div>
           {onListEntries.length ? (
             <div style={{ display: "grid", gridTemplateColumns: onListCols, gap: 4 }}>
-              <span style={head}></span><span style={head}>Player</span>
+              <span style={head}></span><span style={head}></span><span style={head}>Player</span>
               <span style={{ ...head, textAlign: "right" }}>Games</span>
               <span style={{ ...head, textAlign: "right" }}>L20 {dayLabel ? dayLabel.slice(0, 3) : ""}</span>
-              <span style={head}></span><span style={head}></span>
+              <span style={{ ...head, textAlign: "right" }}>Score</span>
+              <span style={head}></span>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                 <SortableContext items={onListEntries.map((e) => e.id)} strategy={verticalListSortingStrategy}>
                   {onListEntries.map((entry, i) => (
-                    <SortableListRow key={entry.id} entry={entry} i={i} count={onListEntries.length}
+                    <SortableListRow key={entry.id} entry={entry} i={i}
                       gridCols={onListCols} cell={cell} nameCell={nameCell} iconBtn={iconBtn}
-                      onMoveUp={moveUp} onMoveDown={moveDown} onToggleActive={toggleActive} />
+                      onToggleActive={toggleActive} />
                   ))}
                 </SortableContext>
               </DndContext>
