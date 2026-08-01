@@ -694,6 +694,11 @@ function GamesList({ games, me, isAdmin, presets, onOpen, onCreate, notify }) {
 /* ---------------- game detail ---------------- */
 
 function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, onBack, onJoin, onGuest, onDrop, onConfirm, onDecline, onClose, onCancel, onCost, onPenaltyAmt, onResize, onResolvePenalty, onPenaltyEdit, onTournament, onWinner }) {
+  const [savingCount, setSavingCount] = useState(0);
+  const withSaving = async (fn) => {
+    setSavingCount((n) => n + 1);
+    try { await fn(); } finally { setSavingCount((n) => Math.max(0, n - 1)); }
+  };
   const [guestName, setGuestName] = useState("");
   const [resize, setResize] = useState({ courts: game.courts, perCourt: game.per_court, cap: game.capacity_override ?? "" });
   const cap = capacityOf(game);
@@ -769,14 +774,14 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
         <div style={{ fontSize: 12.5, color: T.sub, marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           Cost/player: AED{" "}
           {isAdmin && !game.closed ? (
-            <input type="number" defaultValue={game.cost_per_player} onBlur={(e) => +e.target.value !== game.cost_per_player && onCost(+e.target.value)} style={{ ...inputStyle, width: 60, padding: "3px 6px", fontWeight: 700 }} />
+            <input type="number" defaultValue={game.cost_per_player} onBlur={(e) => +e.target.value !== game.cost_per_player && withSaving(() => onCost(+e.target.value))} style={{ ...inputStyle, width: 60, padding: "3px 6px", fontWeight: 700 }} />
           ) : <b style={{ color: T.ink }}>{game.cost_per_player}</b>}
           · Late-drop penalty: AED{" "}
           {isAdmin && !game.closed ? (
-            <input type="number" defaultValue={game.penalty} onBlur={(e) => +e.target.value !== game.penalty && onPenaltyAmt(+e.target.value)} style={{ ...inputStyle, width: 60, padding: "3px 6px", fontWeight: 700 }} />
+            <input type="number" defaultValue={game.penalty} onBlur={(e) => +e.target.value !== game.penalty && withSaving(() => onPenaltyAmt(+e.target.value))} style={{ ...inputStyle, width: 60, padding: "3px 6px", fontWeight: 700 }} />
           ) : <b style={{ color: T.ink }}>{game.penalty}</b>}
         </div>
-        {isAdmin && !game.closed && <div style={{ fontSize: 11.5, color: T.sub, marginTop: 2 }}>Both editable until the game is closed.</div>}
+        {isAdmin && !game.closed && <div style={{ fontSize: 11.5, color: T.sub, marginTop: 2 }}>Both editable until the game is closed.{savingCount > 0 ? " Saving…" : ""}</div>}
         <CourtRule />
 
         {!mine && !game.closed && me.status !== "explayer" && (
@@ -904,7 +909,9 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
             <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8 }}>ADMIN CONTROLS</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {!rounds.length && <Btn small tone="ghost" onClick={onTournament}>🏆 Create round robin</Btn>}
-              <Btn small tone="gold" onClick={onClose}>Close game & bill players</Btn>
+              <Btn small tone="gold" onClick={onClose} disabled={savingCount > 0}>
+                {savingCount > 0 ? "Saving edits…" : "Close game & bill players"}
+              </Btn>
               <Btn small tone="red" onClick={onCancel}>Cancel game</Btn>
             </div>
             <div style={{ fontSize: 11.5, color: T.sub, marginTop: 6 }}>
