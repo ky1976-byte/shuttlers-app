@@ -394,7 +394,7 @@ export default function App() {
 
   const game = games.find((g) => g.id === openGame);
   const playerOpen = profiles.find((p) => p.id === openPlayer);
-  const tabs = [["games", "Games"], ["players", "Players"], ["ledger", "Ledger"], ...(isAdmin ? [["reports", "Reports"], ["admin", "Admin"]] : [])];
+  const tabs = [["games", "Games"], ["players", "Players"], ["ledger", "Ledger"], ["rules", "Rules"], ...(isAdmin ? [["reports", "Reports"], ["admin", "Admin"]] : [])];
 
   return (
     <div style={{ fontFamily: font.body, background: T.bg, minHeight: "100vh", color: T.ink }}>
@@ -489,6 +489,11 @@ export default function App() {
             clubBalance={clubBalance} nameOf={nameOf}
             onPay={(id, amt, mode, date, remark) => run(() => rpc("record_payment", { p_user: id, p_amount: amt, p_mode: mode, p_date: date, p_remark: remark }), `AED ${amt} received into club account.`)}
             onTransfer={(f, t, amt) => run(() => rpc("transfer_balance", { p_from: f, p_to: t, p_amount: amt }), "Transfer recorded.")} />
+        )}
+
+        {tab === "rules" && (
+          <RulesView isAdmin={isAdmin}
+            onSave={(content) => run(() => rpc("update_club_rules", { p_content: content }), "Rules updated.")} />
         )}
 
         {tab === "reports" && isAdmin && (
@@ -1109,6 +1114,107 @@ function TransactionFeed({ userId, pageSize = 20 }) {
           <Btn small tone="ghost" onClick={() => { const next = page + 1; setPage(next); loadPage(next, false); }}>Load more</Btn>
         </div>
       )}
+    </>
+  );
+}
+
+/* Renders admin-editable club rules. Content is stored as one plain-text
+   blob using a light markdown convention so admins can edit it as a
+   normal textarea without needing a rich editor:
+     ## Heading      -> starts a new card
+     - item          -> bullet list item
+     blank line      -> paragraph break
+   Anything else is a paragraph. */
+function parseRules(text) {
+  const lines = (text || "").split("\n");
+  const sections = [];
+  let cur = null, list = null;
+  const flushList = () => { if (list) { cur.blocks.push({ type: "ul", items: list }); list = null; } };
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line.startsWith("## ")) {
+      flushList();
+      cur = { heading: line.slice(3).trim(), blocks: [] };
+      sections.push(cur);
+    } else if (line.startsWith("- ")) {
+      if (!cur) { cur = { heading: "", blocks: [] }; sections.push(cur); }
+      if (!list) list = [];
+      list.push(line.slice(2).trim());
+    } else if (line.trim() === "") {
+      flushList();
+    } else {
+      flushList();
+      if (!cur) { cur = { heading: "", blocks: [] }; sections.push(cur); }
+      cur.blocks.push({ type: "p", text: line.trim() });
+    }
+  }
+  flushList();
+  return sections;
+}
+
+function RulesView({ isAdmin, onSave }) {
+  const [content, setContent] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    supabase.from("club_rules").select("content").eq("id", 1).single()
+      .then(({ data }) => { setContent(data?.content || ""); setDraft(data?.content || ""); });
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    try { await onSave(draft); setContent(draft); setEditing(false); }
+    finally { setSaving(false); }
+  };
+
+  if (content === null) return <Card><div style={{ fontSize: 13, color: T.sub }}>Loading…</div></Card>;
+
+  if (editing) {
+    return (
+      <Card>
+        <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 6 }}>Edit club rules</div>
+        <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 8 }}>Use "## Heading" to start a new section and "- " for bullet points.</div>
+        <textarea value={draft} onChange={(e) => setDraft(e.target.value)}
+          style={{ ...inputStyle, width: "100%", minHeight: 360, fontFamily: "monospace", fontSize: 12.5, resize: "vertical" }} />
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <Btn small tone="gold" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Btn>
+          <Btn small tone="ghost" onClick={() => { setDraft(content); setEditing(false); }}>Cancel</Btn>
+        </div>
+      </Card>
+    );
+  }
+
+  const sections = parseRules(content);
+  return (
+    <>
+      {isAdmin && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <Btn small tone="ghost" onClick={() => { setDraft(content); setEditing(true); }}>Edit rules</Btn>
+        </div>
+      )}
+      <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 18, color: T.ink, marginBottom: 2 }}>Club rules and etiquette</div>
+      <div style={{ fontSize: 12, color: T.sub, marginBottom: 14 }}>Visible to all members and admins.</div>
+      {!sections.length && <Card><div style={{ fontSize: 13, color: T.sub }}>No rules published yet.</div></Card>}
+      {sections.map((s, i) => (
+        <Card key={i} style={{ marginBottom: 10 }}>
+          {s.heading && (
+            <div style={{ fontFamily: font.display, fontWeight: 700, fontSize: 14, color: s.heading.toLowerCase() === "penalties" ? T.red : T.ink, marginBottom: 4 }}>
+              {s.heading}
+            </div>
+          )}
+          {s.blocks.map((b, j) =>
+            b.type === "ul" ? (
+              <ul key={j} style={{ margin: "0 0 6px", paddingLeft: 18, fontSize: 13, color: "#374357", lineHeight: 1.6 }}>
+                {b.items.map((it, k) => <li key={k}>{it}</li>)}
+              </ul>
+            ) : (
+              <div key={j} style={{ fontSize: 13, color: "#374357", lineHeight: 1.55, marginBottom: 6 }}>{b.text}</div>
+            )
+          )}
+        </Card>
+      ))}
     </>
   );
 }
