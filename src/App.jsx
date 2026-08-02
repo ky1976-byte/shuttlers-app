@@ -200,6 +200,7 @@ export default function App() {
   const [presets, setPresets] = useState([]);
   const [clubBalance, setClubBalance] = useState(0);
   const [recon, setRecon] = useState(null);
+  const [monthRecons, setMonthRecons] = useState([]);
   const [tab, setTab] = useState("games");
   const [openGame, setOpenGame] = useState(null);
   const [openPlayer, setOpenPlayer] = useState(null);
@@ -306,7 +307,8 @@ export default function App() {
     setPresets(ps.data || []);
     setClubBalance(cb.data?.balance ?? 0);
     const monthKey = new Date().toISOString().slice(0, 8) + "01";
-    setRecon((rc.data || []).find((r) => r.month === monthKey) || { month: monthKey, opening: 0, actual_closing: null });
+    setMonthRecons(rc.data || []);
+    setRecon((rc.data || []).find((r) => r.month === monthKey) || { month: monthKey, opening: null, actual_closing: null });
     if (me) {
       const { data: fresh } = await supabase.from("profiles").select("*").eq("id", me.id).maybeSingle();
       if (fresh) { if (fresh.revoked) setPhase("denied"); setMe(fresh); }
@@ -497,7 +499,7 @@ export default function App() {
         )}
 
         {tab === "reports" && isAdmin && (
-          <ReportsView games={games} expenses={expenses} recon={recon} clubBalance={clubBalance} txns={txns}
+          <ReportsView games={games} expenses={expenses} recon={recon} clubBalance={clubBalance} txns={txns} monthRecons={monthRecons}
             onRecon={(patch) => run(() => supabase.from("month_recon").upsert({ ...recon, ...patch }).then(({ error }) => { if (error) throw error; }))}
             onExpense={(exp) => run(() => supabase.from("expenses").insert({ ...exp, created_by: me.id }).then(({ error }) => { if (error) throw error; }), "Expense recorded (paid from club account).")} />
         )}
@@ -1333,12 +1335,30 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
 
 /* ---------------- reports ---------------- */
 
-function ReportsView({ games, expenses, recon, clubBalance, txns, onRecon, onExpense }) {
+function ReportsView({ games, expenses, recon, clubBalance, txns, monthRecons, onRecon, onExpense }) {
   const [ex, setEx] = useState({ spent_on: "", category: "Court hire", description: "", amount: "" });
   const monthStart = new Date(recon.month);
-  const inMonth = (d) => { const x = new Date(d); return x.getFullYear() === monthStart.getFullYear() && x.getMonth() === monthStart.getMonth(); };
+  const monthKeyOf = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-01`; };
+  const inKeyMonth = (d, key) => monthKeyOf(d) === key;
+  const inMonth = (d) => inKeyMonth(d, recon.month);
   const closed = games.filter((g) => g.closed && inMonth(g.starts_at)).sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
   const monthExpenses = expenses.filter((e) => inMonth(e.spent_on));
+
+  // ---- opening balance default = previous month's close ----
+  // Prefers the previous month's manually-reconciled actual closing
+  // balance if one was entered; otherwise falls back to that month's
+  // calculated closing balance. Only used when this month's opening
+  // hasn't been explicitly overridden (recon.opening == null).
+  const prevKey = (() => { const d = new Date(recon.month); d.setMonth(d.getMonth() - 1); return monthKeyOf(d); })();
+  const prevRecon = (monthRecons || []).find((r) => r.month === prevKey);
+  const prevOpening = prevRecon?.opening ?? 0;
+  const prevReceived = (txns || []).filter((t) => t.kind === "payment" && inKeyMonth(t.created_at, prevKey)).reduce((s, t) => s + +t.amount, 0);
+  const prevSpent = expenses.filter((e) => inKeyMonth(e.spent_on, prevKey)).reduce((s, e) => s + +e.amount, 0);
+  const prevCalcClose = +prevOpening + prevReceived - prevSpent;
+  const defaultOpening = prevRecon?.actual_closing ?? prevCalcClose;
+  const isAutoOpening = recon.opening == null;
+  const openingValue = isAutoOpening ? defaultOpening : +recon.opening;
+
   // Billed amounts (accrual) -- what members were charged, informational
   // only. Not the same as cash actually received; kept separate from
   // the closing-balance formula below so it can't be double-counted or
@@ -1349,47 +1369,85 @@ function ReportsView({ games, expenses, recon, clubBalance, txns, onRecon, onExp
   const pens = closed.reduce((s, g) => s + (+g.penalty_collected || 0), 0);
   const spent = monthExpenses.reduce((s, e) => s + +e.amount, 0);
   const paymentsReceived = (txns || []).filter((t) => t.kind === "payment" && inMonth(t.created_at)).reduce((s, t) => s + +t.amount, 0);
-  const calcClose = +recon.opening + paymentsReceived - spent;
+  const calcClose = openingValue + paymentsReceived - spent;
   const variance = recon.actual_closing == null ? null : +recon.actual_closing - calcClose;
   const cell = { padding: "7px 4px", fontSize: 12, borderBottom: `1px solid ${T.line}` };
   const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: UAE_TZ });
 
+  // ---- year-consolidated export (one file per calendar year) ----
   const exportExcel = async () => {
     const XLSX = await import("xlsx");
     const wb = XLSX.utils.book_new();
+    const year = monthStart.getFullYear();
 
-    const summaryRows = closed.map((g) => {
-      const d = new Date(g.starts_at);
-      return {
-        Date: d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: UAE_TZ }),
-        Day: d.toLocaleDateString("en-GB", { weekday: "long", timeZone: UAE_TZ }),
-        Courts: g.courts,
-        Planned: capacityOf(g),
-        Actual: g.actual_players,
-        "Per player (AED)": g.cost_per_player,
-        "Billed for game (AED)": g.collected,
-        "Billed for penalty (AED)": +g.penalty_collected || 0,
-        "Total billed (AED)": (+g.collected || 0) + (+g.penalty_collected || 0),
-      };
-    });
-    summaryRows.push({});
-    summaryRows.push({ Date: "Opening balance", "Total (AED)": +recon.opening });
-    summaryRows.push({ Date: "Total billed to members (accrual, informational)", "Total (AED)": collections + pens });
-    summaryRows.push({ Date: "Payments actually received", "Total (AED)": paymentsReceived });
-    summaryRows.push({ Date: "Expenses", "Total (AED)": -spent });
-    summaryRows.push({ Date: "Calculated closing balance", "Total (AED)": calcClose });
-    if (recon.actual_closing != null) {
-      summaryRows.push({ Date: "Actual closing (manual)", "Total (AED)": +recon.actual_closing });
-      summaryRows.push({ Date: "Variance", "Total (AED)": variance });
+    const closedYear = games
+      .filter((g) => g.closed && new Date(g.starts_at).getFullYear() === year)
+      .sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+    const expensesYear = expenses.filter((e) => new Date(e.spent_on).getFullYear() === year);
+    const paymentsYear = (txns || []).filter((t) => t.kind === "payment" && new Date(t.created_at).getFullYear() === year);
+
+    // Seed the running balance from December of the previous year so
+    // January's opening carries forward correctly even without a
+    // manual override, same "auto = previous close" logic as on-screen.
+    const priorDecRecon = (monthRecons || []).find((r) => r.month === `${year - 1}-12-01`);
+    let runningClose = priorDecRecon?.actual_closing ?? priorDecRecon?.opening ?? 0;
+
+    const summaryRows = [];
+    for (let m = 0; m < 12; m++) {
+      const monthKey = `${year}-${String(m + 1).padStart(2, "0")}-01`;
+      const mRecon = (monthRecons || []).find((r) => r.month === monthKey);
+      const mOpening = mRecon?.opening ?? runningClose;
+
+      const gamesInMonth = closedYear.filter((g) => new Date(g.starts_at).getMonth() === m);
+      const mCollections = gamesInMonth.reduce((s, g) => s + (+g.collected || 0), 0);
+      const mPens = gamesInMonth.reduce((s, g) => s + (+g.penalty_collected || 0), 0);
+      const mSpent = expensesYear.filter((e) => new Date(e.spent_on).getMonth() === m).reduce((s, e) => s + +e.amount, 0);
+      const mReceived = paymentsYear.filter((t) => new Date(t.created_at).getMonth() === m).reduce((s, t) => s + +t.amount, 0);
+      const mCalcClose = mOpening + mReceived - mSpent;
+      const mActualClose = mRecon?.actual_closing ?? null;
+      runningClose = mActualClose ?? mCalcClose; // carries forward as next month's opening
+
+      if (!gamesInMonth.length && !mRecon) continue; // nothing happened this month — skip printing it
+
+      const monthLbl = new Date(year, m, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+      summaryRows.push({ Date: `— ${monthLbl} —` });
+      gamesInMonth.forEach((g) => {
+        const d = new Date(g.starts_at);
+        summaryRows.push({
+          Date: d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: UAE_TZ }),
+          Day: d.toLocaleDateString("en-GB", { weekday: "long", timeZone: UAE_TZ }),
+          Courts: g.courts,
+          Planned: capacityOf(g),
+          Actual: g.actual_players,
+          "Per player (AED)": g.cost_per_player,
+          "Billed for game (AED)": g.collected,
+          "Billed for penalty (AED)": +g.penalty_collected || 0,
+          "Total billed (AED)": (+g.collected || 0) + (+g.penalty_collected || 0),
+        });
+      });
+      summaryRows.push({ Date: "Opening balance", "Total (AED)": mOpening });
+      summaryRows.push({ Date: "Total billed to members (accrual, informational)", "Total (AED)": mCollections + mPens });
+      summaryRows.push({ Date: "Payments actually received", "Total (AED)": mReceived });
+      summaryRows.push({ Date: "Expenses", "Total (AED)": -mSpent });
+      summaryRows.push({ Date: "Calculated closing balance", "Total (AED)": mCalcClose });
+      if (mActualClose != null) {
+        summaryRows.push({ Date: "Actual closing (manual)", "Total (AED)": mActualClose });
+        summaryRows.push({ Date: "Variance", "Total (AED)": mActualClose - mCalcClose });
+      }
+      summaryRows.push({});
     }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "Summary");
 
-    const expenseRows = monthExpenses.map((e) => ({
-      Date: fmtDate(e.spent_on), Category: e.category, Description: e.description, "Amount (AED)": -e.amount,
-    }));
+    const expenseRows = expensesYear
+      .sort((a, b) => new Date(a.spent_on) - new Date(b.spent_on))
+      .map((e) => ({
+        Date: fmtDate(e.spent_on),
+        Month: new Date(e.spent_on).toLocaleDateString("en-GB", { month: "long" }),
+        Category: e.category, Description: e.description, "Amount (AED)": -e.amount,
+      }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expenseRows), "Expenses");
 
-    XLSX.writeFile(wb, `Shuttlers-consolidation-${recon.month.slice(0, 7)}.xlsx`);
+    XLSX.writeFile(wb, `Shuttlers-consolidation-${year}.xlsx`);
   };
 
   return (
@@ -1398,14 +1456,23 @@ function ReportsView({ games, expenses, recon, clubBalance, txns, onRecon, onExp
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
           <div>
             <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>Monthly consolidation — {monthLabel}</div>
-            <div style={{ fontSize: 12, color: T.sub, marginBottom: 10 }}>All figures from the app; only opening and actual closing are manual reconciliation.</div>
+            <div style={{ fontSize: 12, color: T.sub, marginBottom: 10 }}>All figures from the app; only opening and actual closing are manual reconciliation. Export downloads the whole year in one file.</div>
           </div>
-          <Btn small tone="ghost" onClick={exportExcel}>⬇ Export to Excel</Btn>
+          <Btn small tone="ghost" onClick={exportExcel}>⬇ Export year to Excel</Btn>
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600 }}>Opening balance (manual):</span>
-          <input type="number" defaultValue={recon.opening} onBlur={(e) => +e.target.value !== +recon.opening && onRecon({ opening: +e.target.value })} style={{ ...inputStyle, width: 90, fontWeight: 700 }} />
+          <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+            Opening balance {isAutoOpening ? <span style={{ color: T.sub, fontWeight: 500 }}>(auto — prev. close)</span> : "(manual)"}:
+          </span>
+          <input
+            key={recon.month}
+            type="number"
+            defaultValue={openingValue}
+            onBlur={(e) => { const v = +e.target.value; if (v !== openingValue) onRecon({ opening: v }); }}
+            style={{ ...inputStyle, width: 90, fontWeight: 700 }}
+          />
+          {!isAutoOpening && <Btn small tone="ghost" onClick={() => onRecon({ opening: null })}>Reset to auto</Btn>}
           <span style={{ fontSize: 12, color: T.sub }}>AED · Club account (live): AED {clubBalance}</span>
         </div>
 
@@ -1435,7 +1502,7 @@ function ReportsView({ games, expenses, recon, clubBalance, txns, onRecon, onExp
         </div>
 
         <div style={{ marginTop: 14, background: "#EEF3FA", borderRadius: 10, padding: 12, fontSize: 13 }}>
-          {[["Opening balance", +recon.opening], ["+ Payments received", paymentsReceived], ["− Expenses", spent]].map(([l, v]) => (
+          {[["Opening balance", openingValue], ["+ Payments received", paymentsReceived], ["− Expenses", spent]].map(([l, v]) => (
             <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span>{l}</span><b>AED {v}</b></div>
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0 3px", borderTop: `1px solid ${T.line}`, fontWeight: 700 }}>
