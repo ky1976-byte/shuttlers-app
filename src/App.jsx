@@ -1005,9 +1005,12 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
                         <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                           <span style={{ color: T.sub, fontSize: 12 }}>Court {m.court}</span>
                           {!m.winner && canScore && (<>
-                            <Btn small tone="ghost" onClick={() => onWinner(m.id, 1)}>T1 won</Btn>
-                            <Btn small tone="ghost" onClick={() => onWinner(m.id, 2)}>T2 won</Btn>
+                            <Btn small tone="ghost" onClick={() => { if (window.confirm(`Confirm: ${m.t1.join(" & ")} won?`)) onWinner(m.id, 1); }}>T1 won</Btn>
+                            <Btn small tone="ghost" onClick={() => { if (window.confirm(`Confirm: ${m.t2.join(" & ")} won?`)) onWinner(m.id, 2); }}>T2 won</Btn>
                           </>)}
+                          {m.winner && isAdmin && !game.closed && (
+                            <Btn small tone="ghost" onClick={() => { if (window.confirm("Undo this result? The match will show as unscored again.")) onWinner(m.id, null); }}>Undo</Btn>
+                          )}
                         </span>
                       </div>
                     </div>
