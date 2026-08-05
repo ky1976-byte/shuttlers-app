@@ -155,11 +155,12 @@ function orderedWaitlist(roster) {
 }
 
 /* doubles round robin via circle method */
-function roundRobin(names, courts) {
+function roundRobin(names, courts, maxRounds) {
   const list = [...names];
   while (list.length % 4 !== 0) list.push("— sits out —");
   const n = list.length, rounds = [], arr = [...list];
-  for (let r = 0; r < n - 1; r++) {
+  const cap = Math.min(n - 1, maxRounds ?? n - 1);
+  for (let r = 0; r < cap; r++) {
     const pairs = [];
     for (let i = 0; i < n / 2; i++) pairs.push([arr[i], arr[n - 1 - i]]);
     const matches = [];
@@ -173,6 +174,158 @@ function roundRobin(names, courts) {
     arr.splice(1, 0, arr.pop());
   }
   return rounds;
+}
+
+/* round robin setup flow: team-selection mode, courts/players, optional player picker */
+function RoundRobinSetup({ allPlayers, defaultCourts, onCancel, onSubmit }) {
+  const [step, setStep] = useState("settings");
+  const [mode, setMode] = useState("auto");
+  const [courts, setCourts] = useState(defaultCourts);
+  const [numPlayers, setNumPlayers] = useState(allPlayers.length);
+  const [numRounds, setNumRounds] = useState(Math.min(allPlayers.length - 1, 6));
+  const [chosen, setChosen] = useState(allPlayers);
+
+  const needsPicker = numPlayers < allPlayers.length;
+
+  const goToBuild = (players) => {
+    setChosen(players);
+    setStep(mode === "manual" ? "manual" : "confirm");
+  };
+
+  if (step === "settings") {
+    return (
+      <Card>
+        <div style={{ fontWeight: 700, marginBottom: 10 }}>Create round robin</div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Team selection</div>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+            <input type="radio" checked={mode === "auto"} onChange={() => setMode("auto")} /> Auto — app pairs teams
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+            <input type="radio" checked={mode === "manual"} onChange={() => setMode("manual")} /> Manual — I'll set each match
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+          <label style={{ fontSize: 13 }}>Courts{" "}
+            <input type="number" min={1} value={courts} onChange={(e) => setCourts(+e.target.value)} style={{ ...inputStyle, width: 50, padding: "3px 6px" }} />
+          </label>
+          <label style={{ fontSize: 13 }}>Players{" "}
+            <input type="number" min={4} max={allPlayers.length} value={numPlayers}
+              onChange={(e) => setNumPlayers(Math.max(4, Math.min(allPlayers.length, +e.target.value)))}
+              style={{ ...inputStyle, width: 50, padding: "3px 6px" }} /> of {allPlayers.length} confirmed
+          </label>
+          {mode === "auto" && (
+            <label style={{ fontSize: 13 }}>Rounds{" "}
+              <input type="number" min={1} max={numPlayers - 1} value={numRounds}
+                onChange={(e) => setNumRounds(+e.target.value)}
+                style={{ ...inputStyle, width: 50, padding: "3px 6px" }} />
+            </label>
+          )}
+        </div>
+        {mode === "auto" && <div style={{ fontSize: 11.5, color: T.sub, marginBottom: 10 }}>Each round is one best-of-3 per court — budget ~25–30 min/round.</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn small onClick={() => needsPicker ? setStep("pick") : goToBuild(allPlayers)}>Next</Btn>
+          <Btn small tone="ghost" onClick={onCancel}>Cancel</Btn>
+        </div>
+      </Card>
+    );
+  }
+
+  if (step === "pick") {
+    const toggle = (name) => setChosen((c) => c.includes(name) ? c.filter((x) => x !== name) : c.length < numPlayers ? [...c, name] : c);
+    return (
+      <Card>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>Select {numPlayers} players ({chosen.length}/{numPlayers})</div>
+        <div style={{ maxHeight: 260, overflowY: "auto" }}>
+          {allPlayers.map((name) => (
+            <label key={name} style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 0", fontSize: 13.5 }}>
+              <input type="checkbox" checked={chosen.includes(name)}
+                disabled={!chosen.includes(name) && chosen.length >= numPlayers}
+                onChange={() => toggle(name)} />
+              {name}
+            </label>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <Btn small disabled={chosen.length !== numPlayers} onClick={() => goToBuild(chosen)}>Next</Btn>
+          <Btn small tone="ghost" onClick={onCancel}>Cancel</Btn>
+        </div>
+      </Card>
+    );
+  }
+
+  if (step === "manual") {
+    return <ManualBuilder chosen={chosen} courts={courts} onSubmit={onSubmit} onCancel={onCancel} />;
+  }
+
+  // confirm (auto)
+  const rounds = roundRobin(chosen, courts, numRounds);
+  const rows = rounds.flatMap((round, ri) => round.map((m) => ({ round: ri + 1, court: m.court, t1: m.t1, t2: m.t2 })));
+  return (
+    <Card>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>{rounds.length} rounds · {courts} courts · {chosen.length} players</div>
+      <div style={{ maxHeight: 260, overflowY: "auto", fontSize: 12.5 }}>
+        {rounds.map((round, ri) => (
+          <div key={ri} style={{ marginTop: 6 }}>
+            <b>Round {ri + 1}</b>
+            {round.map((m, i) => <div key={i} style={{ color: T.sub }}>Court {m.court}: {m.t1.join(" & ")} vs {m.t2.join(" & ")}</div>)}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <Btn small onClick={() => onSubmit(rows)}>Create</Btn>
+        <Btn small tone="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </Card>
+  );
+}
+
+function ManualBuilder({ chosen, courts, onSubmit, onCancel }) {
+  const emptyRound = () => Array.from({ length: courts }, () => ({ t1: ["", ""], t2: ["", ""] }));
+  const [rounds, setRounds] = useState([emptyRound()]);
+
+  const setSlot = (ri, ci, team, idx, val) =>
+    setRounds((rs) => rs.map((r, i) => i !== ri ? r : r.map((m, j) => j !== ci ? m :
+      { ...m, [team]: m[team].map((v, k) => k === idx ? val : v) })));
+
+  const complete = rounds.every((r) => r.every((m) => [...m.t1, ...m.t2].every((n) => n)));
+
+  return (
+    <Card>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>Build matches manually</div>
+      <div style={{ maxHeight: 320, overflowY: "auto" }}>
+        {rounds.map((round, ri) => (
+          <div key={ri} style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${T.line}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 700 }}>
+              <span>Round {ri + 1}</span>
+              {rounds.length > 1 && <button onClick={() => setRounds((rs) => rs.filter((_, i) => i !== ri))} style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 12 }}>Remove</button>}
+            </div>
+            {round.map((m, ci) => (
+              <div key={ci} style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap", fontSize: 12.5 }}>
+                <span style={{ color: T.sub }}>Court {ci + 1}:</span>
+                {["t1", "t2"].map((team, ti) => (
+                  <span key={team} style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    {ti === 1 && <span style={{ color: T.sub }}>vs</span>}
+                    {[0, 1].map((idx) => (
+                      <select key={idx} value={m[team][idx]} onChange={(e) => setSlot(ri, ci, team, idx, e.target.value)} style={{ ...inputStyle, padding: "3px 4px", fontSize: 12 }}>
+                        <option value="">—</option>
+                        {chosen.map((n) => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    ))}
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+        <Btn small tone="ghost" onClick={() => setRounds((rs) => [...rs, emptyRound()])}>+ Add round</Btn>
+        <Btn small disabled={!complete} onClick={() => onSubmit(rounds.flatMap((r, ri) => r.map((m, ci) => ({ round: ri + 1, court: ci + 1, t1: m.t1, t2: m.t2 }))))}>Create round robin</Btn>
+        <Btn small tone="ghost" onClick={onCancel}>Cancel</Btn>
+      </div>
+    </Card>
+  );
 }
 
 function pointsTable(matches) {
@@ -463,13 +616,10 @@ export default function App() {
             onResize={(courts, perCourt, cap) => run(() => rpc("update_game_config", { p_game: game.id, p_courts: courts, p_per_court: perCourt, p_cap: cap }), "Game size updated — overflow moved to waitlist / new spots offered from waitlist.")}
             onResolvePenalty={(pid, a) => run(() => rpc("resolve_penalty", { p_penalty: pid, p_action: a }), a === "applied" ? "Penalty charged." : "Penalty waived.")}
             onPenaltyEdit={(pid, amt) => run(() => rpc("update_penalty_amount", { p_penalty: pid, p_amount: amt }), "Penalty amount updated.")}
-            onTournament={() => run(async () => {
-              const names = game.roster.filter((r) => r.status === "in")
-                .map((r) => (r.kind === "guest" ? `${r.guest_name} (${nameOf(r.user_id)})` : nameOf(r.user_id)));
-              if (names.length < 4) throw new Error("Need at least 4 confirmed players for doubles.");
-              const rounds = roundRobin(names, game.courts);
-              const rows = rounds.flatMap((round, ri) => round.map((m) => ({ game_id: game.id, round: ri + 1, court: m.court, t1: m.t1, t2: m.t2 })));
-              const { error } = await supabase.from("matches").insert(rows);
+            onTournament={(rows) => run(async () => {
+              if (rows.length === 0) throw new Error("No matches to create.");
+              const finalRows = rows.map((r) => ({ ...r, game_id: game.id }));
+              const { error } = await supabase.from("matches").insert(finalRows);
               if (error) throw error;
             }, "Round robin created — results shared with attendees.")}
             onWinner={(mid, w) => run(() => rpc("record_result", { p_match: mid, p_winner: w }))} />
@@ -707,6 +857,7 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
     try { await fn(); } finally { setSavingCount((n) => Math.max(0, n - 1)); }
   };
   const [guestName, setGuestName] = useState("");
+  const [showRRSetup, setShowRRSetup] = useState(false);
   const [resize, setResize] = useState({ courts: game.courts, perCourt: game.per_court, cap: game.capacity_override ?? "" });
   const cap = capacityOf(game);
   const byTime = (a, b) => new Date(a.joined_at) - new Date(b.joined_at);
@@ -915,7 +1066,7 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
           <div style={{ marginTop: 18, borderTop: `2px solid ${T.line}`, paddingTop: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 8 }}>ADMIN CONTROLS</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {!rounds.length && <Btn small tone="ghost" onClick={onTournament}>🏆 Create round robin</Btn>}
+              {!rounds.length && !showRRSetup && <Btn small tone="ghost" onClick={() => setShowRRSetup(true)}>🏆 Create round robin</Btn>}
               <Btn small tone="gold" onClick={onClose} disabled={savingCount > 0}>
                 {savingCount > 0 ? "Saving edits…" : "Close game & bill players"}
               </Btn>
@@ -925,6 +1076,16 @@ function GameDetail({ game, matches, penalties, profiles, me, isAdmin, nameOf, o
               Closing bills AED {game.cost_per_player} per confirmed player (guests to their sponsor), updates appearances, and adds this game to the monthly consolidation. The cutoff flips automatically from the game time.
               {" "}<b>Cancel</b> permanently deletes an unbilled game (e.g. rained out) — no charges, no record kept.
             </div>
+            {showRRSetup && (
+              <div style={{ marginTop: 12 }}>
+                <RoundRobinSetup
+                  allPlayers={playing.map(label)}
+                  defaultCourts={game.courts}
+                  onCancel={() => setShowRRSetup(false)}
+                  onSubmit={(rows) => { onTournament(rows); setShowRRSetup(false); }}
+                />
+              </div>
+            )}
           </div>
         )}
       </Card>
