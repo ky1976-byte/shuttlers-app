@@ -154,24 +154,38 @@ function orderedWaitlist(roster) {
   return [...waits.filter((r) => r.kind === "member").sort(byTime), ...waits.filter((r) => r.kind === "guest").sort(byTime)];
 }
 
-/* doubles round robin via circle method */
+/* doubles round robin — fair rotation by play count, not the classic circle method
+   (circle method fixes one player in place across all rounds, which meant whoever
+   was first in the roster order never sat out; this instead benches whoever has
+   played the most so far, so everyone's appearance count stays within 1 game) */
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function roundRobin(names, courts, maxRounds) {
-  const list = [...names];
-  while (list.length % 4 !== 0) list.push("— sits out —");
-  const n = list.length, rounds = [], arr = [...list];
-  const cap = Math.min(n - 1, maxRounds ?? n - 1);
-  for (let r = 0; r < cap; r++) {
-    const pairs = [];
-    for (let i = 0; i < n / 2; i++) pairs.push([arr[i], arr[n - 1 - i]]);
+  const n = names.length;
+  if (n < 4) return [];
+  const roundsWanted = Math.max(1, maxRounds ?? n - 1);
+  const slotsPerRound = Math.min(courts, Math.floor(n / 4)) * 4;
+  const playCount = Object.fromEntries(names.map((nm) => [nm, 0]));
+  const rounds = [];
+
+  for (let r = 0; r < roundsWanted; r++) {
+    // rank by fewest games played so far; random tiebreak so ties (e.g. round 1, all at 0) aren't always the same subset
+    const ranked = shuffle(names).sort((a, b) => playCount[a] - playCount[b]);
+    const active = shuffle(ranked.slice(0, slotsPerRound));
     const matches = [];
-    for (let i = 0; i + 1 < pairs.length; i += 2) {
-      const [p1, p2] = [pairs[i], pairs[i + 1]];
-      const t1 = [p1[0], p2[0]], t2 = [p1[1], p2[1]];
-      if (![...t1, ...t2].includes("— sits out —") && matches.length < courts)
-        matches.push({ court: matches.length + 1, t1, t2 });
+    for (let c = 0; c + 3 < active.length; c += 4) {
+      const four = active.slice(c, c + 4);
+      matches.push({ court: matches.length + 1, t1: [four[0], four[1]], t2: [four[2], four[3]] });
     }
+    active.forEach((nm) => { playCount[nm] += 1; });
     if (matches.length) rounds.push(matches);
-    arr.splice(1, 0, arr.pop());
   }
   return rounds;
 }
