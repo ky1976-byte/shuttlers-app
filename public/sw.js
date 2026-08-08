@@ -18,9 +18,21 @@ self.addEventListener("push", (e) => {
   const data = e.data ? e.data.json() : { title: "Shuttlers BC", body: "" };
   e.waitUntil(self.registration.showNotification(data.title || "Shuttlers BC", {
     body: data.body || "", icon: "/icon-192.png", badge: "/icon-192.png",
+    data: { url: data.url || "/" },
   }));
 });
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  e.waitUntil(clients.openWindow("/"));
+  const targetUrl = e.notification.data?.url || "/";
+  e.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          if ("navigate" in client) client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      return clients.openWindow(targetUrl);
+    })
+  );
 });
