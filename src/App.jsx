@@ -470,6 +470,7 @@ export default function App() {
     (async () => {
       try {
         const inviteToken = new URLSearchParams(window.location.search).get("invite");
+        const deepLinkTab = new URLSearchParams(window.location.search).get("tab");
         let { data: { session } } = await supabase.auth.getSession();
         if (!session && inviteToken) {
           const { error } = await supabase.auth.signInAnonymously();
@@ -485,6 +486,11 @@ export default function App() {
         if (!prof) { setPhase("invite"); return; }
         if (prof.revoked) { setPhase("denied"); return; }
         setMe(prof);
+        const validTabs = ["games", "players", "ledger", "rules", "reports", "admin"];
+        if (deepLinkTab && validTabs.includes(deepLinkTab)) {
+          setTab(deepLinkTab);
+          window.history.replaceState({}, "", "/");
+        }
         setPhase("ready");
       } catch (e) { setPhase("error"); setErrMsg(e.message); }
     })();
