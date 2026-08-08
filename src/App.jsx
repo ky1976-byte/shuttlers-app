@@ -167,24 +167,65 @@ function shuffle(arr) {
   return a;
 }
 
+function pairKey(a, b) { return [a, b].sort().join("|"); }
+
+function buildGroups(active) {
+  const groups = [];
+  for (let c = 0; c + 3 < active.length; c += 4) {
+    const four = active.slice(c, c + 4);
+    groups.push([[four[0], four[1]], [four[2], four[3]]]);
+  }
+  return groups;
+}
+
+// lower score = fewer repeat partnerships/opponent match-ups vs. history so far;
+// partner repeats weighted higher since playing WITH the same person again feels
+// more repetitive than facing them again
+function scoreGrouping(groups, partnerCount, opponentCount) {
+  let score = 0;
+  for (const [t1, t2] of groups) {
+    score += (partnerCount[pairKey(t1[0], t1[1])] || 0) * 3;
+    score += (partnerCount[pairKey(t2[0], t2[1])] || 0) * 3;
+    for (const p of t1) for (const q of t2) score += (opponentCount[pairKey(p, q)] || 0);
+  }
+  return score;
+}
+
 function roundRobin(names, courts, maxRounds) {
   const n = names.length;
   if (n < 4) return [];
   const roundsWanted = Math.max(1, maxRounds ?? n - 1);
   const slotsPerRound = Math.min(courts, Math.floor(n / 4)) * 4;
   const playCount = Object.fromEntries(names.map((nm) => [nm, 0]));
+  const partnerCount = {};
+  const opponentCount = {};
   const rounds = [];
 
   for (let r = 0; r < roundsWanted; r++) {
-    // rank by fewest games played so far; random tiebreak so ties (e.g. round 1, all at 0) aren't always the same subset
+    // fairness: bench whoever has played the most so far; random tiebreak
     const ranked = shuffle(names).sort((a, b) => playCount[a] - playCount[b]);
-    const active = shuffle(ranked.slice(0, slotsPerRound));
-    const matches = [];
-    for (let c = 0; c + 3 < active.length; c += 4) {
-      const four = active.slice(c, c + 4);
-      matches.push({ court: matches.length + 1, t1: [four[0], four[1]], t2: [four[2], four[3]] });
+    const active = ranked.slice(0, slotsPerRound);
+
+    // try several random arrangements of who's active this round, keep whichever
+    // repeats fewest partnerships/opponent match-ups against everything so far
+    let best = null, bestScore = Infinity;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const arranged = shuffle(active);
+      const groups = buildGroups(arranged);
+      const score = scoreGrouping(groups, partnerCount, opponentCount);
+      if (score < bestScore) { bestScore = score; best = groups; }
+      if (bestScore === 0) break;
     }
-    active.forEach((nm) => { playCount[nm] += 1; });
+
+    const matches = best.map((g, i) => ({ court: i + 1, t1: g[0], t2: g[1] }));
+    matches.forEach((m) => {
+      [...m.t1, ...m.t2].forEach((nm) => { playCount[nm] += 1; });
+      partnerCount[pairKey(m.t1[0], m.t1[1])] = (partnerCount[pairKey(m.t1[0], m.t1[1])] || 0) + 1;
+      partnerCount[pairKey(m.t2[0], m.t2[1])] = (partnerCount[pairKey(m.t2[0], m.t2[1])] || 0) + 1;
+      m.t1.forEach((p) => m.t2.forEach((q) => {
+        opponentCount[pairKey(p, q)] = (opponentCount[pairKey(p, q)] || 0) + 1;
+      }));
+    });
     if (matches.length) rounds.push(matches);
   }
   return rounds;
@@ -365,6 +406,7 @@ export default function App() {
   const [matches, setMatches] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [presets, setPresets] = useState([]);
+  const [creditRequests, setCreditRequests] = useState([]);
   const [clubBalance, setClubBalance] = useState(0);
   const [recon, setRecon] = useState(null);
   const [monthRecons, setMonthRecons] = useState([]);
@@ -452,7 +494,7 @@ export default function App() {
   const loadAll = async () => {
     if (!supabase) return;
     try { await rpc("check_promotions"); } catch (e) { /* non-critical — next load will retry */ }
-    const [pr, gm, bl, tx, pe, ma, ex, ps, cb, rc] = await Promise.all([
+    const [pr, gm, bl, tx, pe, ma, ex, ps, cb, rc, cr] = await Promise.all([
       supabase.from("profiles").select("*").order("name"),
       supabase.from("games").select("*, roster(*)").order("starts_at", { ascending: true }),
       supabase.from("balances").select("*"),
@@ -463,6 +505,7 @@ export default function App() {
       supabase.from("presets").select("*"),
       supabase.from("club_balance").select("*").maybeSingle(),
       supabase.from("month_recon").select("*"),
+      supabase.from("credit_requests").select("*").order("created_at", { ascending: false }),
     ]);
     setProfiles(pr.data || []);
     setGames(gm.data || []);
@@ -472,6 +515,7 @@ export default function App() {
     setMatches(ma.data || []);
     setExpenses(ex.data || []);
     setPresets(ps.data || []);
+    setCreditRequests(cr.data || []);
     setClubBalance(cb.data?.balance ?? 0);
     const monthKey = new Date().toISOString().slice(0, 8) + "01";
     setMonthRecons(rc.data || []);
@@ -652,9 +696,13 @@ export default function App() {
 
         {tab === "ledger" && (
           <LedgerView me={me} isAdmin={isAdmin} profiles={profiles} balances={balances} txns={txns}
-            clubBalance={clubBalance} nameOf={nameOf}
+            clubBalance={clubBalance} nameOf={nameOf} creditRequests={creditRequests}
             onPay={(id, amt, mode, date, remark) => run(() => rpc("record_payment", { p_user: id, p_amount: amt, p_mode: mode, p_date: date, p_remark: remark }), `AED ${amt} received into club account.`)}
-            onTransfer={(f, t, amt) => run(() => rpc("transfer_balance", { p_from: f, p_to: t, p_amount: amt }), "Transfer recorded.")} />
+            onTransfer={(f, t, amt) => run(() => rpc("transfer_balance", { p_from: f, p_to: t, p_amount: amt }), "Transfer recorded.")}
+            onRequestCredit={(adminId, amt, mode) => run(() => rpc("request_credit", { p_admin: adminId, p_amount: amt, p_mode: mode }), "Payment recorded — waiting on admin to confirm.")}
+            onEditCredit={(id, amt, mode, adminId) => run(() => rpc("edit_credit_request", { p_request: id, p_amount: amt, p_mode: mode, p_admin: adminId }), "Request updated.")}
+            onConfirmCredit={(id, finalAmt) => run(() => rpc("confirm_credit", { p_request: id, p_final_amount: finalAmt }), "Payment confirmed.")}
+            onRejectCredit={(id, reason) => run(() => rpc("reject_credit", { p_request: id, p_reason: reason }), "Request declined.")} />
         )}
 
         {tab === "rules" && (
@@ -1401,7 +1449,118 @@ function RulesView({ isAdmin, onSave }) {
 
 /* ---------------- ledger ---------------- */
 
-function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf, onPay, onTransfer }) {
+function RecordPaymentCard({ me, profiles, creditRequests, onRequestCredit, onEditCredit }) {
+  const admins = profiles.filter((p) => p.is_admin && !p.revoked);
+  const defaultAdmin = admins.find((a) => a.name === "Assad")?.id || admins[0]?.id || "";
+  const [form, setForm] = useState({ admin: defaultAdmin, amount: "", mode: "Cash" });
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({ admin: "", amount: "", mode: "Cash" });
+
+  const mine = creditRequests.filter((r) => r.user_id === me.id)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  const submit = () => {
+    if (!form.admin || !form.amount) return;
+    onRequestCredit(form.admin, +form.amount, form.mode);
+    setForm({ admin: defaultAdmin, amount: "", mode: "Cash" });
+  };
+
+  const startEdit = (r) => { setEditing(r.id); setEditForm({ admin: r.admin_id, amount: r.amount, mode: r.payment_mode }); };
+  const saveEdit = (r) => { onEditCredit(r.id, +editForm.amount, editForm.mode, editForm.admin); setEditing(null); };
+  const statusColor = (s) => s === "confirmed" ? T.green : s === "rejected" ? T.red : T.court;
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 4 }}>Record a payment</div>
+      <div style={{ fontSize: 12, color: T.sub, marginBottom: 8 }}>Paid an admin in cash or by transfer? Log it here — it'll show as pending until they confirm.</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <select value={form.admin} onChange={(e) => setForm({ ...form, admin: e.target.value })} style={{ ...inputStyle, minWidth: 110 }}>
+          {admins.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <input type="number" placeholder="AED" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} style={{ ...inputStyle, width: 80 }} />
+        <select value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value })} style={{ ...inputStyle, minWidth: 110 }}>
+          <option>Cash</option><option>Bank transfer</option><option>Careem Pay</option>
+        </select>
+        <Btn small onClick={submit} disabled={!form.admin || !form.amount}>Submit</Btn>
+      </div>
+
+      {mine.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.sub, marginBottom: 6, letterSpacing: 0.5 }}>YOUR PAYMENT REQUESTS</div>
+          {mine.map((r) => (
+            <div key={r.id} style={{ padding: "8px 0", borderBottom: `1px solid ${T.line}` }}>
+              {editing === r.id ? (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <select value={editForm.admin} onChange={(e) => setEditForm({ ...editForm, admin: e.target.value })} style={{ ...inputStyle, padding: "4px 6px", fontSize: 12 }}>
+                    {admins.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                  <input type="number" value={editForm.amount} onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })} style={{ ...inputStyle, width: 70, padding: "4px 6px", fontSize: 12 }} />
+                  <select value={editForm.mode} onChange={(e) => setEditForm({ ...editForm, mode: e.target.value })} style={{ ...inputStyle, padding: "4px 6px", fontSize: 12 }}>
+                    <option>Cash</option><option>Bank transfer</option><option>Careem Pay</option>
+                  </select>
+                  <Btn small onClick={() => saveEdit(r)}>Save</Btn>
+                  <Btn small tone="ghost" onClick={() => setEditing(null)}>Cancel</Btn>
+                </div>
+              ) : (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+                  <span>AED {r.amount} to {profiles.find((p) => p.id === r.admin_id)?.name || "?"} via {r.payment_mode}</span>
+                  <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: statusColor(r.status), textTransform: "uppercase" }}>{r.status}</span>
+                    {r.status === "pending" && <button onClick={() => startEdit(r)} style={{ background: "none", border: "none", color: T.court, cursor: "pointer", fontSize: 12 }}>Edit</button>}
+                  </span>
+                </div>
+              )}
+              {r.status === "rejected" && r.reject_reason && <div style={{ fontSize: 11.5, color: T.sub, marginTop: 2 }}>Reason: {r.reject_reason}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PendingCreditPanel({ profiles, creditRequests, nameOf, onEditCredit, onConfirmCredit, onRejectCredit }) {
+  const pending = creditRequests.filter((r) => r.status === "pending").sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({ amount: "", mode: "Cash" });
+  if (!pending.length) return null;
+  const startEdit = (r) => { setEditing(r.id); setEditForm({ amount: r.amount, mode: r.payment_mode }); };
+
+  return (
+    <Card style={{ marginBottom: 14 }}>
+      <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 4 }}>Pending payment confirmations ({pending.length})</div>
+      {pending.map((r) => (
+        <div key={r.id} style={{ padding: "9px 0", borderBottom: `1px solid ${T.line}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5 }}>
+            <span style={{ fontWeight: 600 }}>{nameOf(r.user_id)}</span>
+            <span style={{ color: T.sub, fontSize: 12 }}>→ {nameOf(r.admin_id)}</span>
+          </div>
+          {editing === r.id ? (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+              <input type="number" value={editForm.amount} onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })} style={{ ...inputStyle, width: 70, padding: "4px 6px", fontSize: 12 }} />
+              <select value={editForm.mode} onChange={(e) => setEditForm({ ...editForm, mode: e.target.value })} style={{ ...inputStyle, padding: "4px 6px", fontSize: 12 }}>
+                <option>Cash</option><option>Bank transfer</option><option>Careem Pay</option>
+              </select>
+              <Btn small onClick={() => { onEditCredit(r.id, +editForm.amount, editForm.mode, r.admin_id); setEditing(null); }}>Save</Btn>
+              <Btn small tone="ghost" onClick={() => setEditing(null)}>Cancel</Btn>
+            </div>
+          ) : (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>AED {r.amount} <span style={{ fontWeight: 400, color: T.sub, fontSize: 12 }}>via {r.payment_mode}</span></span>
+              <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button onClick={() => startEdit(r)} style={{ background: "none", border: "none", color: T.court, cursor: "pointer", fontSize: 12 }}>Edit</button>
+                <Btn small onClick={() => onConfirmCredit(r.id, r.amount)}>Confirm</Btn>
+                <Btn small tone="red" onClick={() => { const reason = window.prompt("Reason for declining?"); if (reason) onRejectCredit(r.id, reason); }}>Reject</Btn>
+              </span>
+            </div>
+          )}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf, creditRequests, onPay, onTransfer, onRequestCredit, onEditCredit, onConfirmCredit, onRejectCredit }) {
   const [amounts, setAmounts] = useState({});
   const [ledgerQ, setLedgerQ] = useState("");
   const [detailFor, setDetailFor] = useState(null);
@@ -1421,6 +1580,8 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
           {myBal < 0 ? "Pay cash to any admin — it's recorded to the club account." : "You're all settled. 🏸"}
         </div>
       </Card>
+
+      <RecordPaymentCard me={me} profiles={profiles} creditRequests={creditRequests} onRequestCredit={onRequestCredit} onEditCredit={onEditCredit} />
 
       <Card style={{ marginBottom: 14 }}>
         <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15 }}>My transactions</div>
@@ -1443,6 +1604,8 @@ function LedgerView({ me, isAdmin, profiles, balances, txns, clubBalance, nameOf
             </div>
             <div style={{ fontSize: 11.5, color: T.sub, marginTop: 4 }}>Cash receipts credit, expenses debit this account. Admins are billed for their own games like any member.</div>
           </Card>
+
+          <PendingCreditPanel profiles={profiles} creditRequests={creditRequests} nameOf={nameOf} onEditCredit={onEditCredit} onConfirmCredit={onConfirmCredit} onRejectCredit={onRejectCredit} />
 
           <Card style={{ marginBottom: 14 }}>
             <div style={{ fontFamily: font.display, fontWeight: 800, fontSize: 15, marginBottom: 4 }}>Member ledger (admin)</div>
